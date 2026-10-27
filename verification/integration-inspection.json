@@ -1,4 +1,6 @@
 {
+  "new_app": "Kichray WeaponLab 0.2.0",
+  "source_base": "restored MaterialLab 0.13.0; original base 9d0be1aa320651207d7922d712e0741922ea6aa1 + user patch",
   "unchanged_renderer_assets": [
     "src/Renderer.cpp",
     "src/Renderer.h",
@@ -6,15 +8,32 @@
     "src/StartupSplash.cpp",
     "src/StartupSplash.h",
     "src/OGF.cpp",
-    "src/DDS.cpp",
     "assets/Preview.hlsl",
     "assets/MaterialLab.ico",
     "assets/MaterialLab.png",
     "assets/StartupSplash.png"
   ],
+  "intentional_shared_decoder_change": "DDS dimension bound 8192 -> 16384; 16 megapixel allocation cap retained",
   "all_cpp_in_project": true,
   "all_ui_actions_handled": true,
-  "new_app": "Kichray WeaponLab 0.1.0",
-  "source_base": "restored MaterialLab 0.13.0; original base 9d0be1aa320651207d7922d712e0741922ea6aa1 + user patch",
-  "windows_compile_and_run": false
+  "windows_compile_and_run": false,
+  "inspection_type": "static source review; does not replace MSVC compilation or native runtime checks",
+  "reviewed_integration": [
+    "simulation input suspends camera/flight outside model view",
+    "scene OGF part visibility forwarded to retained renderer",
+    "transparent capture uses renderer visibility flags",
+    "PNG fitting retains premultiplied-alpha resampling and 1024 maximum export side",
+    "edited icon rectangles checked against actual atlas before save",
+    "Ctrl+S processed while text editor owns keyboard",
+    "native smoke exercises hidden-part alpha and restored visibility"
+  ],
+  "ui_visual_review": {
+    "method": "CPU rasterization of actual ImGui draw lists with synthetic model/icon/simulation fixtures; no native D3D11 run",
+    "reviewed": [
+      "wrapped description at 960x600",
+      "trajectory title and plot at 960x600",
+      "fixed metric scatter target at 1490x900",
+      "icon grid and scrollable controls at 1490x900"
+    ]
+  }
 }

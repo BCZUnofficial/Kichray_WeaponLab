@@ -9,7 +9,8 @@ namespace lab {
 struct IconRect { int x=0,y=0,w=1,h=1; };
 struct IconGrid {
     int cellPixels=50;
-    static constexpr int MaxCells=20;
+    // The full atlas uses fixed-size cells. A UI may display 20x20 cells at once,
+    // but coordinates are never capped at 20 or stretched to fit a texture.
     int columns(const Image& atlas) const;
     int rows(const Image& atlas) const;
     bool validate(const Image& atlas,const IconRect& rect,std::string& error) const;

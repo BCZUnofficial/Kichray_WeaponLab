@@ -20,6 +20,15 @@ struct WeaponRecord {
     int iconX=0,iconY=0,iconWidth=1,iconHeight=1;
     std::vector<WeaponValue> values;
 };
+// A copy of effective values: strings remain as written in LTX (including
+// quotes), and absent keys are absent rather than filled with laboratory defaults.
+using WeaponConfigValues=std::map<std::string,std::string>;
+struct WeaponAmmoRecord {
+    std::string section,label;
+    WeaponConfigValues values;
+    bool available=false;
+    std::string error;
+};
 // Supports finite scalars and comma-separated numeric vectors, and rejects
 // partial parses, NaN/Inf and locale-dependent decimal commas.
 bool ParseWeaponNumbers(const std::string& text,std::vector<double>& numbers);
@@ -42,6 +51,13 @@ public:
               const std::filesystem::path& extraRoot={});
     const std::vector<WeaponRecord>& weapons() const;
     const WeaponRecord* find(const std::string& section) const;
+    // Includes non-catalog sections such as ammunition and [bullet_manager].
+    // Missing/duplicate sections and unresolved ancestry return an explicit error.
+    bool sectionValues(const std::string& section,WeaponConfigValues& values,
+                       std::string& error) const;
+    // Returns ammo_class in configuration order, including unavailable IDs so
+    // the UI can show the problem instead of silently choosing a different round.
+    std::vector<WeaponAmmoRecord> ammunitionForWeapon(const std::string& section) const;
     const std::vector<std::string>& warnings() const;
     const std::filesystem::path& weaponsDirectory() const;
     const std::filesystem::path& stringTablePath() const;

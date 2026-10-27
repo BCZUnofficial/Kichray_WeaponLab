@@ -1,35 +1,45 @@
 {
-  "version": "Kichray WeaponLab 0.1.0",
+  "version": "Kichray WeaponLab 0.2.0",
   "base": "Material Lab 0.13.0 restored sources",
+  "engine_reference": {
+    "repository": "https://github.com/BCZUnofficial/kichray",
+    "branch": "master",
+    "commit": "6d832035330a004a2ffabce8d124f17409dcc563"
+  },
   "portable_suites": {
-    "passed": 7,
-    "failed": 0
+    "passed": 8,
+    "failed": 0,
+    "names": [
+      "flight-input-tests",
+      "icon-atlas-tests",
+      "parser-tests",
+      "renderer-preview-tests",
+      "viewport-tests",
+      "weapon-data-tests",
+      "weapon-simulation-tests",
+      "weapon-ui-tests"
+    ]
   },
   "asan_ubsan_suites": {
-    "passed": 7,
+    "passed": 8,
     "failed": 0,
+    "names": [
+      "flight-input-tests",
+      "icon-atlas-tests",
+      "parser-tests",
+      "renderer-preview-tests",
+      "viewport-tests",
+      "weapon-data-tests",
+      "weapon-simulation-tests",
+      "weapon-ui-tests"
+    ],
     "leak_sanitizer": "disabled via ASAN_OPTIONS=detect_leaks=0"
   },
   "compiler": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04) 13.3.0",
-  "windows_compile": "not performed: native compiler/SDK absent; cross compiler installation unavailable (package endpoints HTTP503)",
-  "windows_run": "not performed; --smoke-test provided for native D3D11/WARP/WIC checks",
+  "windows_compile": "not performed: native compiler and Windows SDK absent",
+  "windows_run": "not performed; --smoke-test provided for native D3D11/WARP/WIC and mesh visibility checks",
+  "github_actions": "workflow supplied; no successful run asserted",
   "retained_bytes": {
-    "assets/MaterialLab.ico": {
-      "matches_base": true,
-      "sha256": "95084b74ea0c9025676ebe960485f17b02c51f08bf0f50754142f1ac46a182c7"
-    },
-    "assets/MaterialLab.png": {
-      "matches_base": true,
-      "sha256": "2485021aa7bf69892d207cc5f8c36775e2dbbc52343ce1898ca97745841fc4bb"
-    },
-    "assets/StartupSplash.png": {
-      "matches_base": true,
-      "sha256": "c333f113f5aaff9f0481a6d88e61b7853c40b990ce550d7d3b41baf3db6ebb85"
-    },
-    "assets/Preview.hlsl": {
-      "matches_base": true,
-      "sha256": "7696abe22f58dd488a8677c5f54a44f0f41b9558d813d0113a36d6c2e1462174"
-    },
     "src/Renderer.cpp": {
       "matches_base": true,
       "sha256": "5250e1f4ef9620df44077bc1dd4b9345b09bfd0648bf63d08c700c2236d0fc96"
@@ -41,37 +51,70 @@
     "src/FlightInput.h": {
       "matches_base": true,
       "sha256": "763eb2ad1074c3f355fdd747dbdbe12980908f1e69298b60512000a069781b27"
+    },
+    "src/StartupSplash.cpp": {
+      "matches_base": true,
+      "sha256": "8dc6fe8307743a488e4121aaf7e9e9748828634c304f6e9538304de1777e2c20"
+    },
+    "src/StartupSplash.h": {
+      "matches_base": true,
+      "sha256": "dd50faa092ea9dd777d89033280ff3c70ecd16d0addec56abbc96028ef896181"
+    },
+    "src/OGF.cpp": {
+      "matches_base": true,
+      "sha256": "e1ae9bfca9da233a13ee6b0a8ebadc6ababcddb477d05bbe4894163d0b970fc7"
+    },
+    "assets/Preview.hlsl": {
+      "matches_base": true,
+      "sha256": "7696abe22f58dd488a8677c5f54a44f0f41b9558d813d0113a36d6c2e1462174"
+    },
+    "assets/MaterialLab.ico": {
+      "matches_base": true,
+      "sha256": "95084b74ea0c9025676ebe960485f17b02c51f08bf0f50754142f1ac46a182c7"
+    },
+    "assets/MaterialLab.png": {
+      "matches_base": true,
+      "sha256": "2485021aa7bf69892d207cc5f8c36775e2dbbc52343ce1898ca97745841fc4bb"
+    },
+    "assets/StartupSplash.png": {
+      "matches_base": true,
+      "sha256": "c333f113f5aaff9f0481a6d88e61b7853c40b990ce550d7d3b41baf3db6ebb85"
     }
   },
   "portable_source_sha256": {
     "src/AttachmentPreview.h": "1a36e208b12813d2f2fa71b31480b970b9e28347049279455a4dfc79fa8949cc",
     "src/Core.cpp": "c83bf32173b94374fb37c64f0264c9cfd569a5812de7a2f752c1b7a4cc3bd55a",
     "src/Core.h": "156c01fbfe7ec3807d83306cc8b4af68b0adaca4f002e9ee56dde3b06d9286f1",
-    "src/DDS.cpp": "194925013edab279db492b8248a0b9cf028f26cb4bd92544cef4694b0a5e45b8",
+    "src/DDS.cpp": "bae093c0bee5cbae60c4ef573a3b9506a5be383c839ba10070bdcd13466d7736",
     "src/EngineLighting.h": "f310e545f960b69b2f983985e11d5f847d367a775658b1e059c70b96560d1fc6",
     "src/EngineTexture.h": "05b69ca433d26c687eb78c645aac2b56cae596f78678647ab64001e2c49bfe97",
     "src/FlightInput.h": "763eb2ad1074c3f355fdd747dbdbe12980908f1e69298b60512000a069781b27",
-    "src/IconAtlas.cpp": "e57709f772f0389c9b89b037cbcceb16716df4733db9ef820fccd98bfb2ea69a",
-    "src/IconAtlas.h": "372e4b423667bc251e9a2d398a0d45c461061a47f8b502e5d24a08ac6d0251e0",
+    "src/IconAtlas.cpp": "173b81c07db9d396ecceeea6bd858e441d61dae496e31478189236e2d8f3f308",
+    "src/IconAtlas.h": "a9d28458c629dbfa6c0b3089fe895ce93ab589967a4a65396c2139265b96ee49",
     "src/MaterialAlpha.h": "a9c47518c7166b556827eb7ebbd130768c23cecd94794222c09bba3412c66572",
     "src/OGF.cpp": "e1ae9bfca9da233a13ee6b0a8ebadc6ababcddb477d05bbe4894163d0b970fc7",
     "src/Resource.h": "3af575e3fc7ef9a2fc217eb33b7ccbaafa73bca45c240e8c6eec95c2983c9386",
     "src/ViewportTools.h": "bf750a28814d057f43dc4e794508be9023f792fb6fcc767b217e764cafd99489",
-    "src/WeaponData.cpp": "221d6f235f60e69b2f83146ca99650de26aa1d7209fae454da7f06473922d47c",
-    "src/WeaponData.h": "d8df7141a3a20573edab3aa26f99af905c989f9c3a2905c6314a86d1a04a07aa",
-    "src/WeaponUI.cpp": "5a20bd980199975f5cd034cde52dc6b9c2258e0e67cca6100f74acf274c014e3",
-    "src/WeaponUI.h": "8647d5abe82061fc7333a53f529a724df9ecd0082d7625234257bfebb0085bfc",
+    "src/WeaponData.cpp": "0bf4742cfada8a582751f6052a915d01641991bc244011f833d957cd7c167bcc",
+    "src/WeaponData.h": "5d3d78399a0a99e2b8d28761cdc041f356ce1db5d587249f25deb13d70842972",
+    "src/WeaponSimulation.cpp": "749357435b04c75cff475f6a097d060970f3c59bb15f9e6313dc2997e4012c78",
+    "src/WeaponSimulation.h": "414813036b90527f2ade6fc95db442f871f871b36030903894793af6c55c233c",
+    "src/WeaponUI.cpp": "65e93baa9c562726ec7325d5c9b61e44309485830cdf845484d482a164d5bcff",
+    "src/WeaponUI.h": "1ba2a7a30a52b1fc57c77542f9397906eb29d2518aa866a276dff4659c613e68",
     "tests/FlightInputTests.cpp": "bae12ce3ec80f30a604ef395bb6171a073296ea1db5133b7ed77729e4202955a",
-    "tests/IconAtlasTests.cpp": "553a283adafac6cfa72fd38ce2ddaf1960222dd83abb5c48146bf0844efed017",
-    "tests/ParserTests.cpp": "128c351c132f5a2e4b9cf2da73b5b2bf4d567556e780187d4e185d22774c7c8f",
+    "tests/IconAtlasTests.cpp": "b14d3973acea180f8f2e0852312038e71ba2f66397118777cb287a8431193465",
+    "tests/ParserTests.cpp": "1b816e0909722225bc60b03b4a882dd619041728933992732bca51425a3b7624",
     "tests/RendererPreviewTests.cpp": "fb1f1b6dde5ae222ed50471a5908f8d222246c85b3c0115c76085d105cb7d279",
     "tests/ViewportToolsTests.cpp": "e8900e838d3d3dcbca5082c21292adc31cd074443d07e1c5afb4be59f0dac953",
-    "tests/WeaponDataTests.cpp": "db4a90e491858a26774b73906f08576fac4ab0bf4db28b5b46d558ca5894114e",
-    "tests/WeaponUITests.cpp": "3aba60b867cd73e98c847cab3295040ae6d97ceb4374d114ace71e038a6c64eb"
+    "tests/WeaponDataTests.cpp": "d877434a6a5c1022318c32d0a830cbfbbe2e0bfe59358dfac7ee8e6b5b28a8b3",
+    "tests/WeaponSimulationTests.cpp": "58eda2d88b895f8e8ca41500c97b5c0bef14a58344c7ae39514a87e3f23bdd66",
+    "tests/WeaponUITests.cpp": "25f35a183baf20e449b23468d4c97cead5761597130b35ea5ab142e5db357ef5"
   },
   "windows_source_sha256": {
-    "src/WinApp.cpp": "2080d450979799d4383498d55ee6d3ac996d35295d68e3d96a3635fc6f795831",
+    "src/WinApp.cpp": "cafea8ecf542805973edafdb973efb271d12c148a43bbe118452cea9c7c61975",
     "src/Renderer.cpp": "5250e1f4ef9620df44077bc1dd4b9345b09bfd0648bf63d08c700c2236d0fc96",
-    "src/Renderer.h": "656d980b26a0556dc9d8aef92cf7f513890b4fc2c5e1fc263100def96745523d"
+    "src/Renderer.h": "656d980b26a0556dc9d8aef92cf7f513890b4fc2c5e1fc263100def96745523d",
+    "src/StartupSplash.cpp": "8dc6fe8307743a488e4121aaf7e9e9748828634c304f6e9538304de1777e2c20",
+    "src/StartupSplash.h": "dd50faa092ea9dd777d89033280ff3c70ecd16d0addec56abbc96028ef896181"
   }
 }

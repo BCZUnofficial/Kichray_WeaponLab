@@ -77,7 +77,7 @@ Image DecodeDDS(const std::vector<uint8_t>& buf,std::string& err){
  auto fail=[&](const char* reason)->Image{err=reason;return {};};
  if(buf.size()<128||rd(buf.data())!=0x20534444||rd(buf.data()+4)!=124||rd(buf.data()+76)!=32)return fail("Invalid DDS header");
  const uint32_t h=rd(buf.data()+12),w=rd(buf.data()+16),flags=rd(buf.data()+80),code=rd(buf.data()+84),depth=rd(buf.data()+24),headerFlags=rd(buf.data()+8),caps2=rd(buf.data()+112);
- if(!w||!h||w>8192||h>8192||depth>1||uint64_t(w)*h>(16u*1024u*1024u))return fail("DDS dimensions unsupported");
+ if(!w||!h||w>16384||h>16384||depth>1||uint64_t(w)*h>(16u*1024u*1024u))return fail("DDS dimensions unsupported");
  if(caps2&(0x200u|0xfc00u|0x200000u))return fail("DDS cube and volume textures are unsupported");
  size_t offset=128;int kind=0;
  if(flags&4){

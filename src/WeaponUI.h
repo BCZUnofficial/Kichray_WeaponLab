@@ -1,5 +1,6 @@
 #pragma once
 #include "imgui.h"
+#include "WeaponSimulation.h"
 #include <array>
 #include <functional>
 #include <string>
@@ -8,12 +9,14 @@
 namespace lab {
 enum class WeaponMode { Fly, Orbit, Pan, Light, Model };
 enum class WeaponTab { Parameters, Texts, Scene };
+enum class WeaponView { Model, Spread, Trajectory };
 enum class WeaponAction {
     SelectWeapon, SaveData, DiscardData, ReloadCatalog,
     DefaultPaths, BrowsePath, ApplyPaths,
     ChangeParameter, ChangeTexts, SetMode, Frame, ResetView, AxisView,
     LightSettings, BackgroundSettings, Wireframe,
-    ApplyIconRect, CaptureIcon, PreviewSnapshot, StageIcon, SaveAtlas, DiscardAtlas, ExportSnapshot
+    ApplyIconRect, CaptureIcon, PreviewSnapshot, StageIcon, SaveAtlas, DiscardAtlas, ExportSnapshot,
+    SimulationSettings, FocusParameter, SimulationView, PartVisibility, ShowAllParts
 };
 // Path indices: gamedata, config/weapons, string table XML, icon atlas DDS,
 // meshes root, textures root. Paths are UTF-8; shell converts to native paths.
@@ -31,6 +34,18 @@ struct WeaponParameter {
     bool integer=false,rangeOpen=false,numericControlsInitialized=false;
 };
 struct WeaponRect {float x=0,y=0,w=0,h=0;};
+struct WeaponMeshRow {std::string label;bool visible=true;};
+struct WeaponAmmoRow {std::string section,label;};
+struct WrappedTextEditState {
+    size_t cursor=0,anchor=0;
+    bool focused=false,dragging=false;
+    std::string observed;
+    std::vector<std::string> undo,redo;
+};
+struct WrappedTextLine {size_t begin=0,end=0;};
+// Visual lines retain byte offsets into the unchanged original UTF-8 string.
+std::vector<WrappedTextLine> LayoutWeaponDescription(const std::string& text,float maxWidth);
+
 struct WeaponUIState {
     WeaponPathState paths;
     bool setupOpen=true,iconEditorOpen=false;
@@ -38,6 +53,17 @@ struct WeaponUIState {
     std::vector<WeaponRow> weapons;
     int selected=-1;
     std::vector<WeaponParameter> parameters;
+    std::vector<WeaponMeshRow> meshes;
+    std::vector<WeaponAmmoRow> ammunition;
+    WeaponView view=WeaponView::Model;
+    bool simulationAvailable=false;
+    int selectedAmmoIndex=0,selectedFireMode=-1;
+    float spreadDistance=50,trajectoryDistance=200,condition=1,triggerPause=.25f;
+    float targetRadiusCm=50.f; // Fixed metric target; never auto-rescaled by parameter edits.
+    uint32_t seed=1701;
+    SimulationResult simulation;
+    WrappedTextEditState descriptionEdit;
+    bool inspectorWheelUsed=false;
     std::string name,description,nameId,descriptionId,modelName;
     bool dataDirty=false,atlasDirty=false,hasModel=false;
     bool canEditName=true,canEditDescription=true;

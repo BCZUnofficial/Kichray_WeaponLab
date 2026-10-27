@@ -19,9 +19,11 @@
 #include <string>
 #include <vector>
 #include <stdexcept>
+#include <set>
 #include "Renderer.h"
 #include "WeaponUI.h"
 #include "WeaponData.h"
+#include "WeaponSimulation.h"
 #include "IconAtlas.h"
 #include "FlightInput.h"
 #include "EngineTexture.h"
@@ -33,7 +35,7 @@ extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND,UINT,WPARAM,LP
 namespace {
 using Microsoft::WRL::ComPtr;
 namespace fs=std::filesystem;
-constexpr const wchar_t* AppTitle=L"Kichray WeaponLab 0.1.0";
+constexpr const wchar_t* AppTitle=L"Kichray WeaponLab 0.2.0";
 std::string utf8(const std::wstring& text) {
     if(text.empty())return {};
     int size=WideCharToMultiByte(CP_UTF8,0,text.data(),int(text.size()),nullptr,0,nullptr,nullptr);
@@ -167,7 +169,7 @@ fs::path assetPath(const fs::path& root,std::string name,const wchar_t* extensio
     return root/path;
 }
 bool overlaps(lab::IconRect a,lab::IconRect b) {
-    return a.x<b.x+b.w&&b.x<a.x+a.w&&a.y<b.y+b.h&&b.y<a.y+a.h;
+    return int64_t(a.x)<int64_t(b.x)+b.w&&int64_t(b.x)<int64_t(a.x)+a.w&&int64_t(a.y)<int64_t(b.y)+b.h&&int64_t(b.y)<int64_t(a.y)+a.h;
 }
 class App {
     HWND window_=nullptr;
@@ -180,6 +182,8 @@ class App {
     ComPtr<ID3D11ShaderResourceView> atlasView_,snapshotView_;
     lab::Image snapshot_,fitted_;
     std::string section_,queuedSelection_;
+    std::set<std::string> editedIconSections_;
+    std::string simulationSection_;
     bool textDraftPending_=false;
     bool ready_=false,running_=true,minimized_=false,viewportFocus_=false,dpiPending_=false;
     float dpi_=1.f;ULONGLONG lastTick_=0;
@@ -197,7 +201,13 @@ class App {
         if(FAILED(renderer_.Device()->CreateTexture2D(&d,&s,t.GetAddressOf()))||FAILED(renderer_.Device()->CreateShaderResourceView(t.Get(),nullptr,next.GetAddressOf())))return false;
         out=std::move(next);return true;
     }
-    void updateAtlas(){if(!texture(atlas_.image(),atlasView_))fail("Не удалось создать предпросмотр атласа.");ui_.atlasWidth=int(atlas_.image().w);ui_.atlasHeight=int(atlas_.image().h);}
+    void updateAtlas(){
+        if(!texture(atlas_.image(),atlasView_)){
+            atlasView_.Reset();const std::string error="Не удалось создать предпросмотр атласа на видеокарте. DDS загружен; проверьте размер текстуры и доступную видеопамять.";
+            fail(error);ui_.warning+="\n"+error;
+        }
+        ui_.atlasWidth=int(atlas_.image().w);ui_.atlasHeight=int(atlas_.image().h);
+    }
     void refreshRows() {
         ui_.weapons.clear();ui_.selected=-1;
         const auto root=fs::u8path(loadedPaths_.values[4]);
@@ -207,8 +217,33 @@ class App {
             if(w.section==section_)ui_.selected=int(ui_.weapons.size()-1);
         }
     }
+    void updateSimulation() {
+        lab::SimulationConfig weapon,physics;std::string error;
+        const std::string priorAmmo=ui_.selectedAmmoIndex>=0&&size_t(ui_.selectedAmmoIndex)<ui_.ammunition.size()?ui_.ammunition[size_t(ui_.selectedAmmoIndex)].section:std::string{};
+        ui_.ammunition.clear();ui_.simulation={};ui_.simulationAvailable=false;
+        if(!current()){simulationSection_.clear();ui_.view=lab::WeaponView::Model;return;}
+        if(!data_.sectionValues(section_,weapon,error)){ui_.simulation.error=error;ui_.view=lab::WeaponView::Model;return;}
+        ui_.simulationAvailable=lab::IsSimulationFirearm(weapon);
+        if(!ui_.simulationAvailable){ui_.view=lab::WeaponView::Model;return;}
+        const auto ammo=data_.ammunitionForWeapon(section_);
+        int selected=0;
+        for(size_t i=0;i<ammo.size();++i){ui_.ammunition.push_back({ammo[i].section,ammo[i].label+(ammo[i].available?"":" [нет данных]")});if(ammo[i].section==priorAmmo)selected=int(i);}
+        ui_.selectedAmmoIndex=selected;
+        const auto modes=lab::SimulationFireModes(weapon);
+        if(simulationSection_!=section_||std::find(modes.begin(),modes.end(),ui_.selectedFireMode)==modes.end())ui_.selectedFireMode=modes.empty()?1:modes.back();
+        simulationSection_=section_;
+        if(ammo.empty()) {ui_.simulation.supported=true;ui_.simulation.fireModes=modes;ui_.simulation.error="У оружия не указан доступный ammo_class.";return;}
+        const auto& selectedAmmo=ammo[size_t(selected)];
+        if(!selectedAmmo.available){ui_.simulation.supported=true;ui_.simulation.fireModes=modes;ui_.simulation.error=selectedAmmo.error;return;}
+        std::string physicsError;data_.sectionValues("bullet_manager",physics,physicsError);
+        lab::SimulationRequest request;request.weapon=std::move(weapon);request.ammo=selectedAmmo.values;request.bulletManager=std::move(physics);
+        request.weaponSection=section_;request.ammoSection=selectedAmmo.section;request.fireMode=ui_.selectedFireMode;
+        request.spreadDistance=ui_.spreadDistance;request.trajectoryDistance=ui_.trajectoryDistance;request.condition=ui_.condition;
+        request.triggerPause=ui_.triggerPause;request.seed=ui_.seed;ui_.simulation=lab::SimulateWeapon(request);ui_.simulation.ammoName=selectedAmmo.label;
+        if(!physicsError.empty())ui_.simulation.warnings.push_back(physicsError);
+    }
     void refreshCurrent(bool rebuildParameters=true) {
-        const auto* w=current();if(!w){ui_.parameters.clear();ui_.name.clear();ui_.description.clear();ui_.nameId.clear();ui_.descriptionId.clear();ui_.canEditName=false;ui_.canEditDescription=false;clearModel();return;}
+        const auto* w=current();if(!w){ui_.parameters.clear();ui_.name.clear();ui_.description.clear();ui_.nameId.clear();ui_.descriptionId.clear();ui_.canEditName=false;ui_.canEditDescription=false;clearModel();updateSimulation();return;}
         if(!textDraftPending_){ui_.name=w->name;ui_.description=w->description;}ui_.nameId=w->nameId;ui_.descriptionId=w->descriptionId;
         ui_.canEditName=!w->nameId.empty();ui_.canEditDescription=!w->descriptionId.empty();
         ui_.currentIconX=w->iconX;ui_.currentIconY=w->iconY;ui_.currentIconW=w->iconWidth;ui_.currentIconH=w->iconHeight;
@@ -216,10 +251,11 @@ class App {
             ui_.parameters.clear();for(const auto& p:w->values)ui_.parameters.push_back(lab::MakeWeaponParameter(p.key,p.value,p.sourceFile.u8string()+" ["+p.sourceSection+"]",p.inherited));
             ui_.iconX=w->iconX;ui_.iconY=w->iconY;ui_.iconW=w->iconWidth;ui_.iconH=w->iconHeight;
         }
+        updateSimulation();
     }
     void clearModel() {
         for(size_t i=0;i<renderer_.PartCount();++i)renderer_.SetPartVisible(i,false);
-        ui_.hasModel=false;ui_.modelName.clear();snapshot_={};fitted_={};snapshotView_.Reset();ui_.hasSnapshot=false;
+        ui_.hasModel=false;ui_.meshes.clear();ui_.modelName.clear();snapshot_={};fitted_={};snapshotView_.Reset();ui_.hasSnapshot=false;
     }
     bool loadModel() {
         clearModel();const auto* record=current();if(!record)return false;
@@ -229,8 +265,10 @@ class App {
         const auto root=fs::u8path(loadedPaths_.values[5]);std::vector<lab::PartImages> images;
         std::vector<lab::EngineTextureMetadata> metadata;std::vector<std::vector<lab::Image>> bumpMips,bumpXMips;
         std::vector<std::string> missing;
+        std::vector<lab::WeaponMeshRow> meshRows;
         for(const auto& part:mesh.parts)if(part.valid()) {
             lab::PartImages im;lab::EngineTextureMetadata meta;
+            meshRows.push_back({"Часть "+std::to_string(meshRows.size()+1)+" · "+part.texture,true});
             const auto file=assetPath(root,part.texture,L".dds","textures/");
             if(!file.empty()){
                 im.diffuse=loadImage(file,error);auto thm=file;thm.replace_extension(L".thm");lab::ReadEngineTextureMetadata(readBytes(thm),meta);
@@ -256,7 +294,7 @@ class App {
             if(images[i].hasBump&&!renderer_.SetPartBumpMipImages(i,bumpMips[i],bumpXMips[i]))ui_.warning="Часть mip-уровней bump не загрузилась; используется основной уровень.";
         }
         renderer_.SkeletonEnabled(false);renderer_.OutlineEnabled(false);renderer_.ClearHover();renderer_.ClearBrushCursor();
-        ui_.hasModel=true;ui_.modelName=model.u8string();
+        ui_.hasModel=true;ui_.meshes=std::move(meshRows);ui_.modelName=model.u8string();
         ui_.status="Загружено: "+record->label+" ["+record->section+"].";
         if(!missing.empty()){ui_.status+=" Не найдены diffuse: ";for(const auto& name:missing)ui_.status+=name+"; ";}
         return true;
@@ -291,10 +329,15 @@ class App {
     bool saveData() {
         if(!flushPendingParameters()||!flushPendingTexts())return false;
         std::string error;
+        for(const auto& section:editedIconSections_){const auto* record=data_.find(section);
+            if(!record||!atlas_.grid.validate(atlas_.image(),{record->iconX,record->iconY,record->iconWidth,record->iconHeight},error)){
+                fail("Координаты иконки ["+section+"] вне выбранного атласа. Исправьте их перед сохранением. "+error);return false;
+            }
+        }
         // Atlas first: if a later LTX/XML write fails, report it; never claim an all-file atomic transaction.
         if(atlas_.dirty()&&!atlas_.save(error)){fail(error);return false;}
         if(data_.dirty()&&!data_.save(error)){fail("Конфиги/XML не сохранены: "+error+" Уже сохранённые изменения DDS остаются на диске.");return false;}
-        ui_.status="Изменения сохранены. Резервные копии находятся рядом с исходными файлами.";return true;
+        editedIconSections_.clear();ui_.status="Изменения сохранены. Резервные копии находятся рядом с исходными файлами.";return true;
     }
     bool confirmPending() {
         if(!data_.dirty()&&!atlas_.dirty()&&!hasPendingParameters()&&!textDraftPending_)return true;
@@ -312,8 +355,8 @@ class App {
         if(!nextAtlas.load(fs::u8path(ui_.paths.values[3]),error)){fail("Атлас: "+error);ui_.setupOpen=true;return false;}
         data_=std::move(next);atlas_=std::move(nextAtlas);loadedPaths_=ui_.paths;
         ui_.warning.clear();for(const auto& warning:data_.warnings()){if(ui_.warning.size()>3000){ui_.warning+="\n…";break;}ui_.warning+=warning+"\n";}
-        section_.clear();textDraftPending_=false;ui_.parameters.clear();ui_.name.clear();ui_.description.clear();ui_.nameId.clear();ui_.descriptionId.clear();
-        clearModel();refreshRows();updateAtlas();ui_.setupOpen=false;rememberPaths();
+        section_.clear();editedIconSections_.clear();textDraftPending_=false;ui_.parameters.clear();ui_.name.clear();ui_.description.clear();ui_.nameId.clear();ui_.descriptionId.clear();
+        clearModel();refreshRows();updateSimulation();updateAtlas();ui_.setupOpen=false;rememberPaths();
         ui_.status="Найдено оружия: "+std::to_string(ui_.weapons.size())+". Выберите оружие слева.";
         return true;
     }
@@ -330,7 +373,7 @@ class App {
         const std::array<const char*,4> keys={"inv_grid_x","inv_grid_y","inv_grid_width","inv_grid_height"};
         const std::array<int,4> values={ui_.iconX,ui_.iconY,ui_.iconW,ui_.iconH};
         for(size_t i=0;i<4;++i)if(!data_.setValue(section_,keys[i],std::to_string(values[i]),error)){fail(error);return false;}
-        refreshCurrent();ui_.status="Координаты иконки изменены в конфиге. Нажмите «Сохранить».";return true;
+        editedIconSections_.insert(section_);refreshCurrent();ui_.status="Координаты иконки изменены в конфиге. Нажмите «Сохранить».";return true;
     }
     void capture() {
         if(!ui_.hasModel){fail("Сначала загрузите world-модель оружия.");return;}
@@ -341,7 +384,7 @@ class App {
     bool previewSnapshot() {
         std::string error;if(!atlas_.grid.validate(atlas_.image(),selectedRect(),error)){fail(error);return false;}
         fitted_=lab::FitIconSnapshot(snapshot_,uint32_t(ui_.iconW*ui_.cellPixels),uint32_t(ui_.iconH*ui_.cellPixels),ui_.iconPadding,error);
-        if(!fitted_.valid()||!texture(fitted_,snapshotView_)){fail(error.empty()?"Не удалось подготовить снимок.":error);return false;}
+        if(!fitted_.valid()||!texture(fitted_,snapshotView_)){snapshotView_.Reset();ui_.hasSnapshot=false;fail(error.empty()?"Не удалось подготовить снимок.":error);return false;}
         ui_.hasSnapshot=true;ui_.snapshotWidth=int(fitted_.w);ui_.snapshotHeight=int(fitted_.h);return true;
     }
     void stageIcon() {
@@ -365,6 +408,7 @@ class App {
     bool flushPendingParameters() {
         for(auto& p:ui_.parameters)if(p.pending){std::string error;
             if(!data_.setValue(section_,p.key,p.value,error)){fail("Исправьте значение "+p.key+": "+error);return false;}p.pending=false;
+            if(p.key=="inv_grid_x"||p.key=="inv_grid_y"||p.key=="inv_grid_width"||p.key=="inv_grid_height")editedIconSections_.insert(section_);
         }return true;
     }
     bool flushPendingTexts() {
@@ -386,7 +430,7 @@ class App {
         case A::SaveData:saveData();break;
         case A::DiscardData:
             if((data_.dirty()||hasPendingParameters()||textDraftPending_)&&MessageBoxW(window_,L"Отбросить все несохранённые изменения LTX и XML?",AppTitle,MB_YESNO|MB_DEFBUTTON2|MB_ICONQUESTION)!=IDYES)break;
-            if(!data_.reload(error)){fail(error);break;}textDraftPending_=false;refreshRows();refreshCurrent();if(current())loadModel();break;
+            if(!data_.reload(error)){fail(error);break;}editedIconSections_.clear();textDraftPending_=false;refreshRows();refreshCurrent();if(current())loadModel();break;
         case A::ReloadCatalog:ui_.paths=loadedPaths_;loadPaths();break;
         case A::DefaultPaths:defaults();break;
         case A::BrowsePath:{
@@ -401,6 +445,7 @@ class App {
                 const auto key=ui_.parameters[size_t(value)].key;const auto text=ui_.parameters[size_t(value)].value;
                 if(!data_.setValue(section_,key,text,error)){ui_.parameters[size_t(value)].pending=true;fail(error);break;}
                 ui_.parameters[size_t(value)].pending=false;
+                if(key=="inv_grid_x"||key=="inv_grid_y"||key=="inv_grid_width"||key=="inv_grid_height")editedIconSections_.insert(section_);
                 refreshRows();refreshCurrent(false);
                 if(key=="visual")loadModel();else ui_.status="Изменён параметр "+key+"; требуется сохранение.";
             }break;
@@ -408,6 +453,17 @@ class App {
             textDraftPending_=true;
             if(flushPendingTexts())ui_.status="Тексты изменены; требуется сохранение XML. Общие string ID изменятся у всех ссылающихся предметов.";
             break;
+        case A::SimulationSettings:updateSimulation();stopInput();break;
+        case A::SimulationView:stopInput();if(!ui_.simulationAvailable)ui_.view=lab::WeaponView::Model;break;
+        case A::FocusParameter:
+            if(ui_.simulationAvailable&&value>=0&&size_t(value)<ui_.parameters.size()){
+                const auto& key=ui_.parameters[size_t(value)].key;
+                if(lab::DescribeSimulationParameter(key).relevant){ui_.view=(key=="bullet_speed"||key=="fire_distance")?lab::WeaponView::Trajectory:lab::WeaponView::Spread;stopInput();}
+            }break;
+        case A::PartVisibility:
+            if(value>=0&&size_t(value)<ui_.meshes.size())renderer_.SetPartVisible(size_t(value),ui_.meshes[size_t(value)].visible);
+            break;
+        case A::ShowAllParts:for(size_t i=0;i<ui_.meshes.size();++i){ui_.meshes[i].visible=true;renderer_.SetPartVisible(i,true);}break;
         case A::SetMode:stopInput();renderer_.FlyCameraEnabled(ui_.mode==lab::WeaponMode::Fly);break;
         case A::Frame:renderer_.FrameSelection();break;
         case A::ResetView:renderer_.ResetView();break;
@@ -423,7 +479,9 @@ class App {
         case A::DiscardAtlas:if(!atlas_.dirty()||MessageBoxW(window_,L"Отбросить изменения атласа? Координаты в конфиге остаются отдельными изменениями.",AppTitle,MB_YESNO|MB_DEFBUTTON2|MB_ICONQUESTION)==IDYES){atlas_.discard();updateAtlas();}break;
         case A::ExportSnapshot:{
             if(!previewSnapshot())break;stopInput();const auto file=chooseFile(window_,L"PNG с прозрачностью\0*.png\0",L"png",true,wide(section_+"_icon.png"));
-            if(!file.empty()){if(!saveTransparentPNG(file,fitted_,error))fail(error);else ui_.status="PNG сохранён: "+utf8(file);}break;}
+            if(!file.empty()){const double scale=std::min(1.0,1024.0/std::max(fitted_.w,fitted_.h));
+                const auto png=lab::FitIconSnapshot(snapshot_,std::max(1u,uint32_t(std::lround(fitted_.w*scale))),std::max(1u,uint32_t(std::lround(fitted_.h*scale))),int(std::lround(ui_.iconPadding*scale)),error);
+                if(!png.valid()||!saveTransparentPNG(file,png,error))fail(error);else ui_.status="PNG сохранён: "+utf8(file);}break;}
         }
         ui_.dataDirty=data_.dirty()||hasPendingParameters()||textDraftPending_;ui_.atlasDirty=atlas_.dirty();
     }
@@ -433,10 +491,12 @@ class App {
         if(ImGui::IsMouseClicked(0)||ImGui::IsMouseClicked(1)||ImGui::IsMouseClicked(2))viewportFocus_=ui_.viewportHovered;
         const bool popup=ImGui::IsPopupOpen(nullptr,ImGuiPopupFlags_AnyPopupId|ImGuiPopupFlags_AnyPopupLevel);
         const bool foreground=GetForegroundWindow()==window_;
-        if(!foreground||popup||io.WantTextInput||io.KeyAlt){flight_.Sample(keys,false,false);drag_=Drag::None;return;}
+        if(!foreground||popup||io.KeyAlt){flight_.Sample(keys,false,false);drag_=Drag::None;return;}
         if(io.KeyCtrl&&ImGui::IsKeyPressed(ImGuiKey_S,false)){
             flight_.Suspend();pending_.emplace_back(lab::WeaponAction::SaveData,0);flight_.Sample(keys,false,true);return;
         }
+        if(io.WantTextInput){flight_.Sample(keys,false,false);drag_=Drag::None;return;}
+        if(ui_.view!=lab::WeaponView::Model){stopInput();flight_.Sample(keys,false,false);return;}
         const bool allowed=viewportFocus_&&(!io.WantCaptureKeyboard||ui_.viewportActive)&&(!ImGui::IsAnyItemActive()||ui_.viewportActive);
         if(allowed){
             if(ImGui::IsKeyPressed(ImGuiKey_F,false))renderer_.FrameSelection();
@@ -556,6 +616,12 @@ public:
         for(int axis=0;axis<6;++axis){renderer_.AlignAxis(axis);lab::Image im;check(renderer_.CaptureTransparent(im,1024,error)&&im.valid(),"signed-axis transparent capture");}
         renderer_.ResetView();lab::Image shot;check(renderer_.CaptureTransparent(shot,1024,error),"transparent capture");
         bool alpha=false,body=false;for(auto p:shot.pixels){alpha=alpha||p.a==0;body=body||p.a>0;}check(alpha&&body,"transparent background and visible model");
+        renderer_.SetPartVisible(0,false);lab::Image hidden;
+        const bool hiddenCaptured=renderer_.CaptureTransparent(hidden,1024,error);
+        check(hiddenCaptured&&hidden.valid()&&std::all_of(hidden.pixels.begin(),hidden.pixels.end(),[](lab::Pixel p){return p.a==0;}),"hidden mesh excluded from icon snapshot");
+        renderer_.SetPartVisible(0,true);lab::Image restored;
+        const bool restoredCaptured=renderer_.CaptureTransparent(restored,1024,error);
+        check(restoredCaptured&&restored.valid()&&std::any_of(restored.pixels.begin(),restored.pixels.end(),[](lab::Pixel p){return p.a>0;}),"mesh visibility restored");
         std::string e;auto icon=lab::FitIconSnapshot(shot,250,100,2,e);check(icon.valid(),"snapshot fit");
         const auto temporary=fs::temp_directory_path()/(L"WeaponLab-smoke-"+std::to_wstring(GetCurrentProcessId())+L".png");
         check(saveTransparentPNG(temporary,icon,e),"WIC PNG write");const auto reopened=loadImage(temporary,e);

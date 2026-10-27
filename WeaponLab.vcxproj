@@ -175,6 +175,7 @@ copy /Y "$(ProjectDir)assets\Preview.hlsl" "$(OutDir)assets\Preview.hlsl" &gt;nu
   <ItemGroup>
     <ClCompile Include="src\Core.cpp" />
     <ClCompile Include="src\WeaponData.cpp" />
+    <ClCompile Include="src\WeaponSimulation.cpp" />
     <ClCompile Include="src\IconAtlas.cpp" />
     <ClCompile Include="src\WeaponUI.cpp" />
     <ClCompile Include="src\DDS.cpp" />
@@ -192,6 +193,7 @@ copy /Y "$(ProjectDir)assets\Preview.hlsl" "$(OutDir)assets\Preview.hlsl" &gt;nu
   <ItemGroup>
     <ClInclude Include="src\Core.h" />
     <ClInclude Include="src\WeaponData.h" />
+    <ClInclude Include="src\WeaponSimulation.h" />
     <ClInclude Include="src\IconAtlas.h" />
     <ClInclude Include="src\WeaponUI.h" />
     <ClInclude Include="src\Resource.h" />

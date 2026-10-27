@@ -17,7 +17,7 @@ compiler = shlex.split(os.environ.get("CXX", "g++"))
 flags = ["-std=c++17", "-O1", "-g", "-UNDEBUG", "-Isrc", "-Ithird_party/imgui"]
 if args.sanitize:
     flags += ["-fsanitize=address,undefined", "-fno-omit-frame-pointer"]
-sources = ["src/Core.cpp", "src/DDS.cpp", "src/OGF.cpp", "src/WeaponData.cpp", "src/IconAtlas.cpp"]
+sources = ["src/Core.cpp", "src/DDS.cpp", "src/OGF.cpp", "src/WeaponData.cpp", "src/IconAtlas.cpp", "src/WeaponSimulation.cpp"]
 ui_sources = ["src/WeaponUI.cpp"] + [f"third_party/imgui/{s}.cpp" for s in
     ["imgui", "imgui_draw", "imgui_tables", "imgui_widgets"]]
 tests = {
@@ -28,6 +28,7 @@ tests = {
     "weapon-data-tests": "WeaponDataTests.cpp",
     "icon-atlas-tests": "IconAtlasTests.cpp",
     "weapon-ui-tests": "WeaponUITests.cpp",
+    "weapon-simulation-tests": "WeaponSimulationTests.cpp",
 }
 log = []
 def run(command):

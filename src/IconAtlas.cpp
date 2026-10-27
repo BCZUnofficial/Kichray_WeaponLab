@@ -99,10 +99,10 @@ bool samePixels(const Image& a,const Image& b) {
 }
 }
 int IconGrid::columns(const Image& atlas) const {
-    return atlas.valid()&&cellPixels>0?int(std::min(uint32_t(MaxCells),atlas.w/uint32_t(cellPixels))):0;
+    return atlas.valid()&&cellPixels>0?int(std::min(uint32_t(INT32_MAX),atlas.w/uint32_t(cellPixels))):0;
 }
 int IconGrid::rows(const Image& atlas) const {
-    return atlas.valid()&&cellPixels>0?int(std::min(uint32_t(MaxCells),atlas.h/uint32_t(cellPixels))):0;
+    return atlas.valid()&&cellPixels>0?int(std::min(uint32_t(INT32_MAX),atlas.h/uint32_t(cellPixels))):0;
 }
 bool IconGrid::validate(const Image& atlas,const IconRect& rect,std::string& error) const {
     error.clear();
@@ -110,7 +110,7 @@ bool IconGrid::validate(const Image& atlas,const IconRect& rect,std::string& err
     if(cellPixels<=0||cellPixels>1024){error="Размер клетки должен быть от 1 до 1024 пикселей.";return false;}
     const int cols=columns(atlas),rowCount=rows(atlas);
     if(rect.x<0||rect.y<0||rect.w<=0||rect.h<=0||rect.x>=cols||rect.y>=rowCount||rect.w>cols-rect.x||rect.h>rowCount-rect.y) {
-        error="Прямоугольник иконки выходит за границы сетки атласа (максимум 20×20 клеток).";return false;
+        error="Прямоугольник иконки выходит за границы целых клеток атласа.";return false;
     }
     return true;
 }
@@ -126,8 +126,8 @@ Image CropIcon(const Image& atlas,const IconRect& rect,const IconGrid& grid,std:
 Image FitIconSnapshot(const Image& source,uint32_t width,uint32_t height,int padding,std::string& error) {
     error.clear();
     if(!source.valid()||uint64_t(source.w)*source.h>MaxPixels){error="Снимок модели отсутствует или слишком велик.";return {};}
-    if(width==0||height==0||width>1024||height>1024||padding<0||uint64_t(padding)*2>=width||uint64_t(padding)*2>=height) {
-        error="Размер иконки должен быть не более 1024×1024; поля должны оставлять место для модели.";return {};
+    if(width==0||height==0||width>16384||height>16384||uint64_t(width)*height>MaxPixels||padding<0||uint64_t(padding)*2>=width||uint64_t(padding)*2>=height) {
+        error="Размер иконки превышает предел 16384 по стороне / 16 мегапикселей либо поля не оставляют места для модели.";return {};
     }
     uint32_t minX=source.w,minY=source.h,maxX=0,maxY=0;
     bool visible=false;
@@ -179,7 +179,7 @@ bool ReplaceIcon(Image& atlas,const IconRect& rect,const IconGrid& grid,const Im
     return true;
 }
 std::vector<uint8_t> EncodeIconAtlasDDS(const Image& image) {
-    if(!image.valid()||image.w>8192||image.h>8192||uint64_t(image.w)*image.h>MaxPixels)return {};
+    if(!image.valid()||image.w>16384||image.h>16384||uint64_t(image.w)*image.h>MaxPixels)return {};
     std::vector<uint8_t> bytes;bytes.reserve(128+image.pixels.size()*4);
     put32(bytes,0x20534444);put32(bytes,124);put32(bytes,0x100fu);
     put32(bytes,image.h);put32(bytes,image.w);put32(bytes,image.w*4);put32(bytes,0);put32(bytes,1);

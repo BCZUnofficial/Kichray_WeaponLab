@@ -108,6 +108,12 @@ void ddsHeadersAndPitch(){
  // though Material Lab exports this supported size.
  bad.assign(encoded.begin(),encoded.begin()+128);set32(bad,12,4096);set32(bad,16,4096);set32(bad,20,4096u*4096u);set32(bad,28,1);bad.resize(128+4096u*4096u);
  decoded=lab::DecodeDDS(bad,error);check(decoded.valid()&&decoded.w==4096,"legal4K BC3 texture must decode");
+ // D3D11 permits slender textures wider than8192, while the16MP allocation cap remains.
+ bad.assign(encoded.begin(),encoded.begin()+128);set32(bad,12,4);set32(bad,16,16384);set32(bad,20,65536);set32(bad,28,1);bad.resize(128+65536);
+ check(lab::DecodeDDS(bad,error).valid(),"16384x4 DDS within pixel budget must decode");
+ set32(bad,16,16385);check(!lab::DecodeDDS(bad,error).valid(),"DDS beyond D3D11 max dimension must fail");
+ set32(bad,16,16384);set32(bad,12,1025);check(!lab::DecodeDDS(bad,error).valid(),"DDS pixel budget remains16MP before allocation");
+
 }
 void geometryValidation(){
  std::string error;lab::Mesh mesh;const auto valid=triangle();check(lab::LoadOGFMesh(valid,mesh,error)&&mesh.parts.size()==1&&mesh.parts[0].texture=="act/test","valid static OGF triangle must load");

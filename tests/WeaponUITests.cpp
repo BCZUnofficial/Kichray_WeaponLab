@@ -20,7 +20,7 @@ struct Context {
 #else
         const char* font="/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf";
 #endif
-        ImFontGlyphRangesBuilder glyphs;glyphs.AddRanges(io.Fonts->GetGlyphRangesCyrillic());glyphs.AddText("…−—×");glyphs.BuildRanges(&glyphRanges);
+        ImFontGlyphRangesBuilder glyphs;glyphs.AddRanges(io.Fonts->GetGlyphRangesCyrillic());glyphs.AddText("…−—×→");glyphs.BuildRanges(&glyphRanges);
         if(!io.Fonts->AddFontFromFileTTF(font,16.f*scale,nullptr,glyphRanges.Data))io.Fonts->AddFontDefault();
         unsigned char* data;int w,h;io.Fonts->GetTexDataAsRGBA32(&data,&w,&h);io.Fonts->SetTexID(1);lab::ConfigureWeaponUIStyle(scale);}
     ~Context(){ImGui::DestroyContext();}
@@ -58,8 +58,12 @@ void controls(){Context ctx;auto s=fixture();auto& io=ImGui::GetIO();
     auto* inspector=findWindow("InspectorScroll");require(inspector!=nullptr,"inspector scroll exists");
     const auto row=inspector->GetID(0);const auto component=ImHashData(&s.selected,sizeof(s.selected),row); // same integer 0 seed
     const auto slider=ImHashStr("##StepSlider",0,component);
-    hoverID(inspector,slider);const double before=s.parameters[0].numbers[0];actions.clear();io.AddMouseWheelEvent(0,1);step();step();
+    const auto sliderPoint=hoverID(inspector,slider);const float scrollBefore=inspector->Scroll.y;const double before=s.parameters[0].numbers[0];actions.clear();io.AddMouseWheelEvent(0,1);step();step();
     require(std::abs(s.parameters[0].numbers[0]-before-.01)<1e-10,"wheel advances exactly one step");require(count(lab::WeaponAction::ChangeParameter)==1,"wheel emits one edit");require(s.parameters[0].pending,"pending value remains until shell accepts backend write");
+    actions.clear();io.AddMouseWheelEvent(0,-1);step();step();
+    require(std::abs(s.parameters[0].numbers[0]-before)<1e-10,"down wheel reverses one step");require(inspector->Scroll.y==scrollBefore,"down wheel never scrolls inspector over a slider");
+    io.AddMousePosEvent(20,20);step();io.AddMousePosEvent(sliderPoint.x,sliderPoint.y);io.AddMouseWheelEvent(0,-1);step();step();
+    require(std::abs(s.parameters[0].numbers[0]-before+.01)<1e-10&&inspector->Scroll.y==scrollBefore,"first simultaneous hover/down wheel tick is owned by slider");
     s.parameters[0].step=.125;actions.clear();io.AddMouseWheelEvent(0,1);step();step();
     const double v=s.parameters[0].numbers[0];require(std::abs(v/.125-std::round(v/.125))<1e-10,"keyboard-defined step grid is respected");
     s.parameters[0]=lab::MakeWeaponParameter("hit_power","1");s.parameters[0].minimum=.25;s.parameters[0].maximum=3.25;s.parameters[0].step=1;
@@ -83,7 +87,63 @@ void atlas(){Context ctx;auto s=fixture();s.iconEditorOpen=true;s.hasSnapshot=tr
     io.AddMousePosEvent(x+4.5f*50,y+3.5f*50);step();io.AddMouseButtonEvent(0,false);step();
     require(s.iconX==1&&s.iconY==2&&s.iconW==4&&s.iconH==2,"drag selects inclusive exact cell rectangle");
     require(!actions.empty()&&std::all_of(actions.begin(),actions.end(),[](auto a){return a.first==lab::WeaponAction::PreviewSnapshot;}),"selection refreshes fitted preview without writing files");
+    s.atlasWidth=2048;s.atlasHeight=3072;s.atlasZoom=1;step();step();
+    require(s.atlasRect.w==2000&&s.atlasRect.h==3050,"arbitrary DDS keeps exact 50px cells across whole atlas");
+    auto* scroll=findWindow("AtlasScroll");require(scroll&&scroll->ScrollMax.x>0&&scroll->ScrollMax.y>0,"large atlas scrolls both axes");
+    ImGui::SetScrollX(scroll,1000);ImGui::SetScrollY(scroll,1100);step();step();
+    const float cx=s.atlasRect.x+22.5f*50,cy=s.atlasRect.y+24.5f*50;
+    io.AddMousePosEvent(cx,cy);step();io.AddMouseButtonEvent(0,true);step();io.AddMouseButtonEvent(0,false);step();
+    require(s.iconX==22&&s.iconY==24,"cells past twentieth column and row remain selectable");
     s.iconX=2147483647;s.iconW=2147483647;step(); // malformed fields must not overflow bounds check
+}
+void description(){Context ctx;auto s=fixture();s.tab=lab::WeaponTab::Texts;s.forceTab=true;
+    s.description="Длинное описание оружия с русскими словами, пробелами и неизменными переносами. ";
+    for(int i=0;i<4;++i)s.description+=s.description;
+    s.description+="\nВторая строка. ";s.description+=std::string(150,'x');
+    const auto original=s.description;auto& io=ImGui::GetIO();
+    auto step=[&]{frame(s,960,600);};for(int i=0;i<5;++i)step();
+    require(s.description==original,"visual wrapping never mutates stored description");
+    auto* editor=findWindow("WrappedDescriptionEditor");require(editor!=nullptr,"wrapped editor exists");
+    require(editor->ScrollMax.x==0&&editor->ScrollMax.y>0,"long description wraps vertically without horizontal scroll");
+    const auto lines=lab::LayoutWeaponDescription(original,180);
+    require(lines.size()>5,"description is broken into visual lines");
+    for(const auto& line:lines){require(line.end>=line.begin,"visual line offsets ordered");
+        require(ImGui::CalcTextSize(original.data()+line.begin,original.data()+line.end).x<=181,"even long unbroken words fit line width");
+        require(line.begin==0||(static_cast<unsigned char>(original[line.begin])&0xc0)!=0x80,"wrap starts at UTF8 boundary");}
+    io.AddMousePosEvent(editor->Pos.x+20,editor->Pos.y+20);step();io.AddMouseButtonEvent(0,true);step();io.AddMouseButtonEvent(0,false);step();
+    require(s.descriptionEdit.focused,"click activates wrapped text editor");
+    const size_t position=s.descriptionEdit.cursor;
+    io.AddInputCharactersUTF8("Я");step();step();
+    require(s.description==original.substr(0,position)+"Я"+original.substr(position),"UTF8 typing edits original bytes without soft newline insertion");
+    io.AddKeyEvent(ImGuiKey_Backspace,true);step();io.AddKeyEvent(ImGuiKey_Backspace,false);step();
+    require(s.description==original,"backspace removes one Cyrillic codepoint");
+    io.AddKeyEvent(ImGuiKey_Enter,true);step();io.AddKeyEvent(ImGuiKey_Enter,false);step();
+    require(s.description==original.substr(0,position)+"\n"+original.substr(position),"Enter alone adds explicit source newline");
+    require(io.WantTextInput,"description claims keyboard from camera");
+    s.description="a";s.descriptionEdit.observed="a";s.descriptionEdit.cursor=s.descriptionEdit.anchor=1;s.descriptionEdit.undo={"Я"};
+    io.AddKeyEvent(ImGuiMod_Ctrl,true);io.AddKeyEvent(ImGuiKey_Z,true);step();io.AddKeyEvent(ImGuiKey_Z,false);io.AddKeyEvent(ImGuiMod_Ctrl,false);step();
+    require(s.description=="Я"&&s.descriptionEdit.cursor==0,"undo snaps caret to UTF8 boundary");
+    io.AddInputCharactersUTF8("Б");step();step();require(s.description=="БЯ","typing after unicode undo cannot split codepoint");
+}
+void meshVisibility(){Context ctx;auto s=fixture();s.tab=lab::WeaponTab::Scene;s.forceTab=true;s.meshes={{"Main",true},{"Extra",true}};auto& io=ImGui::GetIO();
+    std::vector<std::pair<lab::WeaponAction,int>> actions;auto step=[&]{frame(s,960,600,[&](lab::WeaponAction a,int value){actions.emplace_back(a,value);});};
+    for(int i=0;i<4;++i)step();auto* inspector=findWindow("InspectorScroll");require(inspector!=nullptr,"scene inspector exists");
+    ImGui::SetScrollY(inspector,inspector->ScrollMax.y);step();step();const int index=1;const auto parent=ImHashData(&index,sizeof(index),inspector->ID);const auto target=ImHashStr("Extra",0,parent);
+    bool found=false;ImVec2 point;
+    for(float y=inspector->Pos.y+5;y<inspector->Pos.y+inspector->Size.y-5;y+=3){io.AddMousePosEvent(inspector->Pos.x+20,y);step();if(GImGui->HoveredId==target){found=true;point=io.MousePos;break;}}
+    require(found,"mesh checkbox visible by scrolling");io.AddMouseButtonEvent(0,true);step();io.AddMouseButtonEvent(0,false);step();
+    require(!s.meshes[1].visible&&std::find(actions.begin(),actions.end(),std::make_pair(lab::WeaponAction::PartVisibility,1))!=actions.end(),"part checkbox toggles intended renderer part");
+}
+void simulation(){Context ctx;auto s=fixture();s.simulationAvailable=true;s.ammunition={{"ammo_545","5.45 обычный"}};
+    s.view=lab::WeaponView::Spread;s.simulation.supported=true;s.simulation.spreadValid=true;s.simulation.magazineSize=30;
+    s.simulation.fireModes={1,3,-1};s.simulation.roundsFired=30;s.simulation.rpm=600;s.simulation.maxConeRadius=.1;
+    s.simulation.spread={{.02,.03,0,1,0,0},{-.01,-.01,.1,.99,1,0}};
+    for(int i=0;i<4;++i)frame(s,960,600);
+    require(!s.viewportHovered&&!s.viewportActive,"simulation never routes pointer into 3D camera");
+    require(findWindow("SimulationScroll")!=nullptr,"simulation replaces model viewport");
+    s.view=lab::WeaponView::Trajectory;s.simulation.trajectoryValid=true;s.simulation.trajectory={{0,0,0,800},{100,-.1,.15,700},{200,-.5,.3,600}};
+    frame(s,960,600);require(!s.viewportActive,"trajectory also isolates camera");
+    s.simulationAvailable=false;frame(s,960,600);require(s.view==lab::WeaponView::Model,"nonfirearm always returns to model");
 }
 void snapshot(const std::string& path,int width,int height) {
     unsigned char* atlas=nullptr;int aw=0,ah=0;ImGui::GetIO().Fonts->GetTexDataAsRGBA32(&atlas,&aw,&ah);
@@ -137,8 +197,11 @@ int main(int argc,char** argv){try{
     if(argc>=5&&std::string(argv[1])=="--snapshot"){
         Context ctx;auto s=fixture();const int w=std::stoi(argv[3]),h=std::stoi(argv[4]);
         if(argc>5&&std::string(argv[5])=="icons")s.iconEditorOpen=true;
-        if(argc>5&&std::string(argv[5])=="scene"){s.tab=lab::WeaponTab::Scene;s.forceTab=true;}
+        if(argc>5&&std::string(argv[5])=="text"){s.tab=lab::WeaponTab::Texts;s.forceTab=true;for(int i=0;i<6;++i)s.description+=" Длинное описание оружия без искусственных переносов: точность и состояние зависят от конфигурации.";}
+        if(argc>5&&std::string(argv[5])=="spread"){s.simulationAvailable=true;s.view=lab::WeaponView::Spread;s.ammunition={{"ammo_545","5.45 обычный"}};s.simulation.supported=s.simulation.spreadValid=true;s.simulation.magazineSize=30;s.simulation.roundsFired=30;s.simulation.rpm=600;s.simulation.maxConeRadius=.25;s.simulation.fireModes={1,3,-1};for(int i=0;i<30;++i)s.simulation.spread.push_back({.2*std::sin(i*3.2),.2*std::cos(i*1.6),i*.1,1,i,0});}
+        if(argc>5&&std::string(argv[5])=="trajectory"){s.simulationAvailable=true;s.view=lab::WeaponView::Trajectory;s.ammunition={{"ammo_545","5.45 обычный"}};s.simulation.supported=s.simulation.trajectoryValid=true;s.simulation.fireModes={1,3,-1};s.simulation.magazineSize=30;s.simulation.rpm=600;for(int i=0;i<=200;i+=5)s.simulation.trajectory.push_back({double(i),-.00003*i*i,i/800.,800.});}
+        if(argc>5&&std::string(argv[5])=="scene"){s.tab=lab::WeaponTab::Scene;s.forceTab=true;s.meshes={{"Основная модель",true},{"Дополнительный меш",false}};}
         for(int i=0;i<5;++i)frame(s,w,h);
         snapshot(argv[2],w,h);return 0;
     }
-    numeric();geometry();controls();atlas();std::cout<<"PASS: WeaponUI numeric steps, 3 panes at 3 sizes, signed axes, actual input, 20x20 atlas drag\n";return 0;}catch(const std::exception& e){std::cerr<<"FAIL: "<<e.what()<<'\n';return 1;}}
+    numeric();geometry();controls();atlas();description();meshVisibility();simulation();std::cout<<"PASS: WeaponUI bidirectional wheel, wrapped UTF8 editing, arbitrary atlas, mesh visibility, simulation panes\n";return 0;}catch(const std::exception& e){std::cerr<<"FAIL: "<<e.what()<<'\n';return 1;}}
