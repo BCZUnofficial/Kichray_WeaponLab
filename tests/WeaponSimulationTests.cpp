@@ -43,5 +43,21 @@ void validation(){auto q=fixture();for(const char* value:{"nan","inf","-1","0","
  q=fixture();q.condition=std::numeric_limits<double>::quiet_NaN();assert(!lab::SimulateWeapon(q).spreadValid);
  assert(lab::DescribeSimulationParameter("condition_shot_dec").relevant);assert(lab::DescribeSimulationParameter("PDM_disp_base").relevant);assert(!lab::DescribeSimulationParameter("inv_weight").relevant);
 }
+void ammunitionMetadata(){
+ // Inventory metadata must stay separate from weapon/fixture controls, including
+ // common names such as inv_weight and properties of grenade ammunition.
+ for(const char* key:{"class","box_size","cost","inv_weight","k_disp","k_hit","k_impulse","k_pierce","k_ap","k_dist","impair","buck_shot","tracer","tracer_color_ID","explosive","wm_size","k_air_resistance","can_be_unlimited","fake_grenade_name","visual","cform","inv_name","inv_name_short","description","inv_grid_x","inv_grid_y","inv_grid_width","inv_grid_height","kill_msg_x","kill_msg_y","kill_msg_width","kill_msg_height","immunities_sect","belt","default_to_ruck","can_take","can_trade","quest_item","slot","item_remove_time","$spawn","k_speed"}){
+  const auto info=lab::DescribeAmmunitionParameter(key);
+  assert(info.relevant&&!info.title.empty()&&!info.description.empty()&&!info.effect.empty());
+ }
+ for(const char* key:{"fire_dispersion_base","condition_shot_dec","rpm","cam_dispersion","PDM_disp_base","unknown_ammo_parameter","jump_height","$prefetch","GroupControlSection","discovery_dependency"}){
+  const auto info=lab::DescribeAmmunitionParameter(key);
+  assert(!info.relevant&&!info.title.empty()&&!info.effect.empty());
+  assert(info.description.find(key)!=std::string::npos); // explicitly identifies the unverified key
+ }
+ assert(lab::DescribeAmmunitionParameter("inv_weight").relevant);
+ assert(!lab::DescribeSimulationParameter("inv_weight").relevant);
+ assert(lab::DescribeAmmunitionParameter("k_disp").description!=lab::DescribeSimulationParameter("k_disp").description);
 }
-int main(){sourceFormula();wearModes();trajectory();classification();validation();std::cout<<"WeaponSimulation PASS: source formulas, RNG, fire modes, condition, SP integrator, limits\n";}
+}
+int main(){sourceFormula();wearModes();trajectory();classification();validation();ammunitionMetadata();std::cout<<"WeaponSimulation PASS: source formulas, RNG, fire modes, condition, SP integrator, limits, ammunition metadata\n";}

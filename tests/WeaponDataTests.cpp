@@ -4,12 +4,28 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <set>
 #include <string>
 #include <chrono>
 namespace fs=std::filesystem;
 static void write(const fs::path& path,const std::string& value){fs::create_directories(path.parent_path());std::ofstream out(path,std::ios::binary);out<<value;assert(out.good());}
 static std::string read(const fs::path& path){std::ifstream in(path,std::ios::binary);return std::string(std::istreambuf_iterator<char>(in),{});}
 static const lab::WeaponValue* value(const lab::WeaponRecord& r,const std::string& key){for(const auto& v:r.values)if(v.key==key)return &v;return nullptr;}
+static void checkCatalogs(const lab::WeaponDatabase& db){
+ std::set<std::string> sections;
+ for(const auto& r:db.weapons()){assert(r.kind==lab::WeaponItemKind::Weapon);assert(sections.insert(r.section).second);}
+ for(const auto& r:db.ammunition()){assert(r.kind==lab::WeaponItemKind::Ammunition);assert(sections.insert(r.section).second);}
+ assert(sections.size()==db.items().size());
+ for(const auto& r:db.items()){
+  assert(sections.erase(r.section)==1);const auto* found=db.find(r.section);assert(found&&found->kind==r.kind);
+  const auto& catalog=r.kind==lab::WeaponItemKind::Weapon?db.weapons():db.ammunition();
+  const lab::WeaponRecord* copy=nullptr;for(const auto& c:catalog)if(c.section==r.section)copy=&c;
+  assert(copy&&copy->label==r.label&&copy->name==r.name&&copy->description==r.description&&copy->visual==r.visual);
+  assert(copy->iconX==r.iconX&&copy->iconY==r.iconY&&copy->iconWidth==r.iconWidth&&copy->iconHeight==r.iconHeight);
+  assert(copy->values.size()==r.values.size());for(const auto& v:r.values){const auto* cv=value(*copy,v.key);assert(cv&&cv->value==v.value&&cv->inherited==v.inherited);}
+ }
+ assert(sections.empty());
+}
 int main(){
  auto root=fs::temp_directory_path()/fs::path("weaponlab-data-tests-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
  const auto weapons=root/"gamedata/config/weapons";
@@ -70,7 +86,67 @@ int main(){
  assert(ammoDB.weapons().size()==1); // Ammo never masquerades as a firearm row.
  assert(ammoDB.setValue("ammo_a","k_disp","2",error));assert(ammoDB.sectionValues("ammo_a",effective,error)&&effective.at("k_disp")=="2");
  assert(ammoDB.ammunitionForWeapon("wpn_test")[1].values.at("k_disp")=="2");
+ // Native ammunition classes have a separate editable inventory catalog.
+ // Names do not determine the type: wpn_round is ammo and rifle_no_prefix is a gun.
+ const auto catalogDir=root/"catalog/config/weapons";const auto catalogXML=root/"catalog/config/text/rus/weapons.xml";
+ const auto catalogSystem=root/"catalog/config/system.ltx";
+ write(catalogXML,"<?xml version=\"1.0\" encoding=\"utf-8\"?><string_table><string id=\"box_name\"><text>Cartridge box</text></string><string id=\"box_short\"><text>Box</text></string><string id=\"box_description\"><text>Original ammunition description</text></string></string_table>");
+ const std::string ammoBase="[ammo_base]\nclass=AMMO\nk_disp=1\nimpair=1\ninv_name=shared_ammo_name\nvisual=shared_ammo.ogf\ninv_grid_width=2\ninv_grid_height=1\ninv_grid_x=2\ninv_grid_y=3\n";
+ write(catalogDir/"bases.ltx",ammoBase+"[weapon_base]\nclass=WP_AK74\ninv_name=shared_gun_name\nvisual=gun.ogf\n");
+ const std::string catalogAmmo=
+  "#include \"bases.ltx\"\n"
+  "[wpn_round]:ammo_base\ninv_name=wpn_round_label\n"
+  "[custom_round]:ammo_base\ninv_name=box_name\ninv_name_short=box_short\ndescription=box_description\nvisual=ammo\\round.ogf\n"
+  "[round_variant]:custom_round\nk_hit=1.4\n"
+  "[vog]:ammo_base\nclass=A_VOG25\n"
+  "[og7b]:ammo_base\nclass=A_OG7B\n"
+  "[m209]:ammo_base\nclass=A_M209\n"
+  "[missing_assets]\nclass=\"AMMO   \"\n"
+  "[wpn_fake_missile]\nclass=G_FAKE\nvisual=projectile.ogf\ninv_name=fake\n"
+  "[round_hud]:ammo_base\n[round_hud_alt]:ammo_base\n[hud_round]:ammo_base\n"
+  "[ammo_template]:ammo_base\n[template_child]:ammo_template\n"
+  "[ammo_impostor]\nclass=II_EXPLO\ninv_name=explosive\nvisual=explosive.ogf\n";
+ write(catalogDir/"weapons.ltx",catalogAmmo);
+ const std::string catalogGun="#include \"weapons.ltx\"\n[rifle_no_prefix]:weapon_base\nammo_class=custom_round, wpn_round, missing_round\ninv_grid_x=5\ninv_grid_y=6\n[wpn_f1]\nclass=G_F1\ninv_name=f1\nvisual=f1.ogf\n[wpn_rgd5]\nclass=G_RGD5\ninv_name=rgd5\nvisual=rgd5.ogf\n";
+ write(catalogDir/"w_gun.ltx",catalogGun);
+ write(catalogSystem,"#include \"weapons\\weapons.ltx\"\n#include \"weapons\\w_gun.ltx\"\n#include \"weapons\\.\\weapons.ltx\"\n");
+ lab::WeaponDatabase catalog;assert(catalog.load(catalogDir,catalogXML,error,catalogSystem));checkCatalogs(catalog);
+ assert(catalog.weapons().size()==3&&catalog.ammunition().size()==8&&catalog.items().size()==11);
+ assert(catalog.warnings().empty()); // Repeated paths/includes are one document.
+ for(const auto* excluded:{"ammo_base","weapon_base","ammo_template","round_hud","round_hud_alt","hud_round","wpn_fake_missile","ammo_impostor"})assert(!catalog.find(excluded));
+ for(const auto* section:{"wpn_round","custom_round","round_variant","vog","og7b","m209","missing_assets","template_child"})assert(catalog.find(section)->kind==lab::WeaponItemKind::Ammunition);
+ assert(catalog.find("wpn_f1")->kind==lab::WeaponItemKind::Weapon&&catalog.find("wpn_rgd5")->kind==lab::WeaponItemKind::Weapon);
+ auto cartridge=*catalog.find("custom_round");assert(cartridge.label=="Cartridge box"&&cartridge.shortNameId=="box_short");
+ assert(cartridge.description=="Original ammunition description"&&cartridge.visual=="ammo\\round.ogf");
+ assert(cartridge.iconX==2&&cartridge.iconY==3&&cartridge.iconWidth==2&&cartridge.iconHeight==1);
+ assert(value(cartridge,"k_disp")->inherited&&value(cartridge,"k_disp")->sourceSection=="ammo_base");
+ // Local ammo overrides immediately update effective values and simulation inputs.
+ assert(catalog.setValue("custom_round","k_disp","2.5",error));assert(catalog.setValue("custom_round","impair","1.75",error));
+ assert(catalog.setValue("custom_round","inv_grid_x","39",error));assert(catalog.setValue("custom_round","inv_grid_y","60",error));
+ assert(catalog.setText("box_name",u8"Патроны",error));assert(catalog.setText("box_description",u8"Описание\nВторая строка",error));
+ checkCatalogs(catalog);assert(catalog.find("custom_round")->name==u8"Патроны");assert(catalog.find("round_variant")->name==u8"Патроны");
+ assert(catalog.ammunitionForWeapon("rifle_no_prefix")[0].values.at("k_disp")=="2.5");
+ assert(catalog.ammunitionForWeapon("rifle_no_prefix")[0].values.at("impair")=="1.75");
+ assert(catalog.ammunitionForWeapon("rifle_no_prefix")[0].label==u8"Патроны");
+ assert(!value(*catalog.find("custom_round"),"k_disp")->inherited);assert(value(*catalog.find("round_variant"),"k_disp")->value=="2.5");
+ assert(catalog.save(error));assert(catalog.reload(error));checkCatalogs(catalog);
+ cartridge=*catalog.find("custom_round");assert(cartridge.iconX==39&&cartridge.iconY==60&&cartridge.name==u8"Патроны"&&cartridge.description==u8"Описание\nВторая строка");
+ assert(read(catalogDir/"bases.ltx")==ammoBase+"[weapon_base]\nclass=WP_AK74\ninv_name=shared_gun_name\nvisual=gun.ogf\n");
+ assert(read(catalogDir/"w_gun.ltx")==catalogGun);assert(catalog.find("rifle_no_prefix")->iconX==5&&catalog.find("rifle_no_prefix")->iconY==6);
+ assert(catalog.ammunitionForWeapon("rifle_no_prefix")[0].values.at("k_disp")=="2.5");
+ // Incomplete input cannot make an item disappear or switch catalog mid-edit.
+ assert(catalog.setValue("missing_assets","visual","",error));assert(catalog.setValue("missing_assets","inv_name","",error));
+ assert(catalog.find("missing_assets")&&catalog.find("missing_assets")->label=="missing_assets");
+ assert(catalog.save(error));assert(catalog.reload(error));assert(catalog.find("missing_assets"));
+ assert(catalog.setValue("missing_assets","class","",error));assert(catalog.find("missing_assets")->kind==lab::WeaponItemKind::Ammunition);
+ assert(catalog.setValue("wpn_round","class","WP_AK74",error));assert(catalog.find("wpn_round")->kind==lab::WeaponItemKind::Ammunition);
+ checkCatalogs(catalog);assert(catalog.save(error));assert(catalog.reload(error));checkCatalogs(catalog);
+ assert(!catalog.find("missing_assets"));assert(catalog.find("wpn_round")->kind==lab::WeaponItemKind::Weapon);
+ assert(catalog.weapons().size()==4&&catalog.ammunition().size()==6);
+ // A genuine duplicate definition remains a single row and is protected.
+ write(catalogDir/"zz_duplicate.ltx","[custom_round]\nclass=AMMO\ninv_name=duplicate\n");assert(catalog.reload(error));checkCatalogs(catalog);
+ assert(!catalog.setValue("custom_round","k_disp","99",error));assert(!catalog.dirty());
  // Numeric parsing is strict, locale independent, finite and vector aware.
  std::vector<double> numbers;assert(lab::ParseWeaponNumbers(" 1e-3, -2.5, +7, 0 ",numbers)&&numbers.size()==4);assert(numbers[0]==.001&&numbers[1]==-2.5);for(const auto& invalid:{"","1,","1 ; note","nan","inf","1e999","1abc","1 2"})assert(!lab::ParseWeaponNumbers(invalid,numbers));assert(std::abs(lab::QuantizeWeaponNumber(.26,.1)-.3)<1e-12);assert(std::abs(lab::QuantizeWeaponNumber(-.26,.1)+.3)<1e-12);assert(lab::ParseWeaponNumbers(lab::FormatWeaponNumbers({.1,1.,1e-9}),numbers)&&numbers.size()==3);
- fs::remove_all(root);std::cout<<"WeaponDataTests: PASS (LTX inheritance/includes, exact writes, CP1251/UTF8 XML, backups/conflicts, numeric stepping)\n";
+ fs::remove_all(root);std::cout<<"WeaponDataTests: PASS (disjoint weapon/ammo catalogs, inherited edits, includes, exact writes, CP1251/UTF8 XML, backups/conflicts, numeric stepping)\n";
 }

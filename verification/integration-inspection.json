@@ -1,5 +1,5 @@
 {
-  "new_app": "Kichray WeaponLab 0.2.0",
+  "new_app": "Kichray WeaponLab 0.3.0",
   "source_base": "restored MaterialLab 0.13.0; original base 9d0be1aa320651207d7922d712e0741922ea6aa1 + user patch",
   "unchanged_renderer_assets": [
     "src/Renderer.cpp",
@@ -13,7 +13,7 @@
     "assets/MaterialLab.png",
     "assets/StartupSplash.png"
   ],
-  "intentional_shared_decoder_change": "DDS dimension bound 8192 -> 16384; 16 megapixel allocation cap retained",
+  "intentional_shared_decoder_change": "retained from 0.2.0: DDS dimension bound 8192 -> 16384; 16 megapixel allocation cap retained",
   "all_cpp_in_project": true,
   "all_ui_actions_handled": true,
   "windows_compile_and_run": false,
@@ -25,15 +25,19 @@
     "PNG fitting retains premultiplied-alpha resampling and 1024 maximum export side",
     "edited icon rectangles checked against actual atlas before save",
     "Ctrl+S processed while text editor owns keyboard",
-    "native smoke exercises hidden-part alpha and restored visibility"
+    "native smoke exercises hidden-part alpha and restored visibility",
+    "weapon and ammunition catalogs use disjoint records with independent search and selection",
+    "catalog switches flush pending values and reject invalid edits",
+    "icon collision warnings inspect both catalogs",
+    "ammunition editing reuses model, lighting, visibility and snapshot paths",
+    "weapon simulation resolves current edited ammo values without standalone ammo firing simulation"
   ],
   "ui_visual_review": {
-    "method": "CPU rasterization of actual ImGui draw lists with synthetic model/icon/simulation fixtures; no native D3D11 run",
+    "method": "CPU rasterization of actual ImGui draw lists with synthetic model/icon/ammunition fixtures; no native 0.3.0 D3D11 run",
     "reviewed": [
-      "wrapped description at 960x600",
-      "trajectory title and plot at 960x600",
-      "fixed metric scatter target at 1490x900",
-      "icon grid and scrollable controls at 1490x900"
+      "ammunition catalog and parameter labels at 960x600 and 1490x900",
+      "wrapped ammunition description at 960x600",
+      "shared icon atlas and ammunition apply caption at 1490x900"
     ]
   }
 }

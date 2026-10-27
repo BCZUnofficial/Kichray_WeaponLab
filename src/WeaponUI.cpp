@@ -157,7 +157,14 @@ void currentIcon(WeaponUIState& s) {
         ImVec2(x*cell/s.atlasWidth,y*cell/s.atlasHeight),ImVec2((x+w)*cell/s.atlasWidth,(y+h)*cell/s.atlasHeight));
 }
 void catalog(WeaponUIState& s,const WeaponUICallback& action) {
-    ImGui::TextUnformatted("ОРУЖИЕ");ImGui::SetNextItemWidth(-1);textInput("##WeaponSearch",s.search);tip("Поиск по названию и секции");
+    if(ImGui::BeginTabBar("WeaponCatalog",ImGuiTabBarFlags_FittingPolicyResizeDown)){
+        const char* names[]={"Оружие","Патроны"};
+        for(int i=0;i<2;++i)if(ImGui::BeginTabItem(names[i],nullptr,s.forceCatalogTab&&int(s.catalog)==i?ImGuiTabItemFlags_SetSelected:0)){
+            if(!s.forceCatalogTab&&int(s.catalog)!=i)action(WeaponAction::SelectCatalog,i);
+            ImGui::EndTabItem();}
+        ImGui::EndTabBar();}
+    s.forceCatalogTab=false;
+    ImGui::SetNextItemWidth(-1);textInput("##WeaponSearch",s.search);tip("Поиск по названию и секции");
     ImGui::TextDisabled("Секций: %d",int(s.weapons.size()));
     const float iconHeight=s.selected>=0?155*s.uiScale:0;
     ImGui::BeginChild("WeaponList",ImVec2(0,std::max(80.f,ImGui::GetContentRegionAvail().y-iconHeight)),ImGuiChildFlags_Borders);
@@ -173,8 +180,10 @@ void parameterPane(WeaponUIState& s,const WeaponUICallback& action) {
     ImGui::TextWrapped("Ползунки изменяют значение дискретно. Шаг и границы задаются с клавиатуры.");
     for(size_t i=0;i<s.parameters.size();++i){auto& p=s.parameters[i];if(!contains(p.key,s.parameterSearch))continue;
         ImGui::PushID(int(i));ImGui::Separator();ImGui::TextWrapped("%s%s",p.key.c_str(),p.inherited?"  [наследуется]":"");tip(p.source);
-        const auto meaning=DescribeSimulationParameter(p.key);
-        if(meaning.relevant){ImGui::TextWrapped("%s",meaning.title.c_str());tip(meaning.description);ImGui::TextWrapped("%s",meaning.effect.c_str());}
+        const auto meaning=s.catalog==WeaponCatalog::Ammunition?DescribeAmmunitionParameter(p.key):DescribeSimulationParameter(p.key);
+        if(meaning.relevant||s.catalog==WeaponCatalog::Ammunition){
+            if(!meaning.title.empty()){ImGui::TextWrapped("%s",meaning.title.c_str());tip(meaning.description);}
+            if(!meaning.effect.empty())ImGui::TextWrapped("%s",meaning.effect.c_str());}
         bool changed=false,activated=false;
         if(!p.numbers.empty()){
             if(!(p.step>0&&std::isfinite(p.step)))p.step=p.integer?1:.01;
@@ -213,7 +222,7 @@ void parameterPane(WeaponUIState& s,const WeaponUICallback& action) {
         }
         activated|=ImGui::IsItemActivated();
         tip("Точное значение. Числовые векторы разделяются запятыми. Ошибочный ввод остаётся черновиком и блокирует сохранение.");
-        if(meaning.relevant&&s.simulationAvailable&&(activated||changed)){
+        if(meaning.relevant&&s.catalog==WeaponCatalog::Weapons&&s.simulationAvailable&&(activated||changed)){
             s.view=(p.key=="bullet_speed"||p.key=="fire_distance")?WeaponView::Trajectory:WeaponView::Spread;
             action(WeaponAction::FocusParameter,int(i));
         }
@@ -276,7 +285,7 @@ void modelViewport(WeaponUIState& s,const WeaponUICallback& action) {
     s.viewportRect={p.x,p.y,size.x,size.y};s.viewportHovered=ImGui::IsItemHovered();s.viewportClicked=ImGui::IsItemClicked();s.viewportActive=ImGui::IsItemActive();
     auto* draw=ImGui::GetWindowDrawList();
     if(s.viewportTexture)draw->AddImage(s.viewportTexture,p,ImVec2(p.x+size.x,p.y+size.y));else draw->AddRectFilled(p,ImVec2(p.x+size.x,p.y+size.y),IM_COL32(24,27,31,255));
-    if(!s.hasModel)draw->AddText(ImVec2(p.x+16,p.y+16),IM_COL32(180,188,198,255),"Выберите оружие из списка");
+    if(!s.hasModel)draw->AddText(ImVec2(p.x+16,p.y+16),IM_COL32(180,188,198,255),s.catalog==WeaponCatalog::Ammunition?"Выберите патроны из списка":"Выберите оружие из списка");
 }
 std::string fireModeName(int mode){return mode<0?"Автоматический":mode==1?"Одиночный":"Очередь "+std::to_string(mode);}
 void simulationViewport(WeaponUIState& s,const WeaponUICallback& action) {
@@ -362,10 +371,11 @@ void simulationViewport(WeaponUIState& s,const WeaponUICallback& action) {
 }
 void viewport(WeaponUIState& s,const WeaponUICallback& action) {
     s.viewportHovered=s.viewportActive=s.viewportClicked=false;
+    const bool canSimulate=s.catalog==WeaponCatalog::Weapons&&s.simulationAvailable;
     const char* names[]={"Модель","Разброс","Траектория"};
-    for(int i=0;i<3;++i){if(i)ImGui::SameLine();ImGui::BeginDisabled(i!=0&&!s.simulationAvailable);
+    for(int i=0;i<3;++i){if(i)ImGui::SameLine();ImGui::BeginDisabled(i!=0&&!canSimulate);
         if(ImGui::Button(names[i])){s.view=WeaponView(i);action(WeaponAction::SimulationView,i);}ImGui::EndDisabled();}
-    if(!s.simulationAvailable)s.view=WeaponView::Model;
+    if(!canSimulate)s.view=WeaponView::Model;
     if(s.view==WeaponView::Model)modelViewport(s,action);else simulationViewport(s,action);
 }
 void setup(WeaponUIState& s,const WeaponUICallback& action) {
@@ -373,11 +383,11 @@ void setup(WeaponUIState& s,const WeaponUICallback& action) {
     const auto& io=ImGui::GetIO();ImGui::SetNextWindowSize(ImVec2(std::min(760.f*s.uiScale,io.DisplaySize.x-24),std::min(620.f*s.uiScale,io.DisplaySize.y-24)),ImGuiCond_Appearing);
     if(ImGui::BeginPopupModal("Источники WeaponLab",&s.setupOpen,ImGuiWindowFlags_NoSavedSettings)){
         ImGui::TextWrapped("Выберите gamedata. Можно использовать стандартные файлы ТЧ 1.0006 или назначить свои пути ниже. Источники доступны для переназначения в любой момент.");
-        const char* labels[]={"gamedata","Конфиги оружия","Названия и описания (XML)","Атлас иконок (DDS)","World-модели (meshes)","Текстуры (textures)"};
+        const char* labels[]={"gamedata","Конфиги оружия и патронов","Названия и описания (XML)","Атлас иконок (DDS)","World-модели (meshes)","Текстуры (textures)"};
         for(int i=0;i<6;++i){ImGui::PushID(i);ImGui::TextUnformatted(labels[i]);ImGui::SetNextItemWidth(std::max(80.f,ImGui::GetContentRegionAvail().x-46*s.uiScale));textInput("##Path",s.paths.values[size_t(i)]);ImGui::SameLine();if(ImGui::Button("…"))action(WeaponAction::BrowsePath,i);ImGui::PopID();
             if(i==0&&fullButton("Использовать стандартные файлы этой gamedata"))action(WeaponAction::DefaultPaths,0);}
         ImGui::Spacing();
-        if(fullButton("Применить пути и прочитать оружие"))action(WeaponAction::ApplyPaths,0);
+        if(fullButton("Применить пути и прочитать конфиги"))action(WeaponAction::ApplyPaths,0);
         ImGui::TextWrapped("%s",s.status.c_str());
         if(!s.warning.empty())ImGui::TextWrapped("%s",s.warning.c_str());
         ImGui::EndPopup();
@@ -399,7 +409,7 @@ void iconEditor(WeaponUIState& s,const WeaponUICallback& action) {
     const bool valid=validRect(s);
     if(!valid)ImGui::TextColored(ImVec4(1,.55f,.35f,1),"Прямоугольник вне сетки");
     ImGui::BeginDisabled(!valid||s.selected<0);
-    if(fullButton("Выбрать эту иконку для оружия"))action(WeaponAction::ApplyIconRect,0);
+    if(fullButton(s.catalog==WeaponCatalog::Ammunition?"Выбрать иконку для патронов":"Выбрать эту иконку для оружия"))action(WeaponAction::ApplyIconRect,0);
     ImGui::EndDisabled();
     ImGui::SeparatorText("icon_snapshot");
     ImGui::TextWrapped("Расположите модель в основном окне. Окно редактора можно переместить или свернуть.");
@@ -502,9 +512,12 @@ void DrawWeaponUI(WeaponUIState& s,const WeaponUICallback& action) {
     const bool pending=std::any_of(s.parameters.begin(),s.parameters.end(),[](const WeaponParameter& p){return p.pending;});
     ImGui::BeginDisabled(!(s.dataDirty||s.atlasDirty||pending));if(ImGui::Button("Сохранить  Ctrl+S"))action(WeaponAction::SaveData,0);ImGui::EndDisabled();
     ImGui::SameLine();ImGui::BeginDisabled(!(s.dataDirty||pending));if(ImGui::Button("Отменить правки"))action(WeaponAction::DiscardData,0);ImGui::EndDisabled();
-    ImGui::SameLine();ImGui::TextDisabled("%s",s.dataDirty||s.atlasDirty||pending?"Есть правки":"WeaponLab 0.2.0");
+    ImGui::SameLine();ImGui::TextDisabled("%s",s.dataDirty||s.atlasDirty||pending?"Есть правки":"WeaponLab 0.3.0");
     const float width=ImGui::GetContentRegionAvail().x,spacing=ImGui::GetStyle().ItemSpacing.x;
-    const float left=std::clamp(width*.20f,175.f,270.f*s.uiScale),right=std::clamp(width*.28f,280.f,390.f*s.uiScale);
+    const auto& style=ImGui::GetStyle();
+    const float catalogMinimum=std::max(175.f,ImGui::CalcTextSize("Оружие").x+ImGui::CalcTextSize("Патроны").x+
+        4*style.FramePadding.x+style.ItemInnerSpacing.x+2*style.WindowPadding.x+style.ScrollbarSize+4);
+    const float left=std::clamp(width*.20f,catalogMinimum,std::max(catalogMinimum,270.f*s.uiScale)),right=std::clamp(width*.28f,280.f,390.f*s.uiScale);
     const float center=std::max(100.f,width-left-right-spacing*2),height=std::max(100.f,ImGui::GetContentRegionAvail().y-52*s.uiScale);
     ImVec2 p=ImGui::GetCursorScreenPos();s.leftRect={p.x,p.y,left,height};
     ImGui::BeginChild("CatalogPane",ImVec2(left,height),ImGuiChildFlags_Borders);++s.renderedPaneCount;catalog(s,action);ImGui::EndChild();ImGui::SameLine();

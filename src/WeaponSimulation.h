@@ -44,6 +44,9 @@ struct SimulationParameterInfo {
 bool IsSimulationFirearm(const SimulationConfig& weapon);
 std::vector<int> SimulationFireModes(const SimulationConfig& weapon);
 SimulationParameterInfo DescribeSimulationParameter(const std::string& key);
+// Inventory ammunition metadata only; does not classify an item or enable the shooting fixture.
+// Unknown keys return relevant=false and an explicit unverified-meaning explanation.
+SimulationParameterInfo DescribeAmmunitionParameter(const std::string& key);
 SimulationResult SimulateWeapon(const SimulationRequest& request);
 // One step of single-player CBulletManager::CalcBullet in an unobstructed world.
 // Position advances at the old velocity; linear drag and gravity change the next velocity.

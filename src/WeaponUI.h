@@ -8,10 +8,11 @@
 
 namespace lab {
 enum class WeaponMode { Fly, Orbit, Pan, Light, Model };
+enum class WeaponCatalog { Weapons, Ammunition };
 enum class WeaponTab { Parameters, Texts, Scene };
 enum class WeaponView { Model, Spread, Trajectory };
 enum class WeaponAction {
-    SelectWeapon, SaveData, DiscardData, ReloadCatalog,
+    SelectWeapon, SelectCatalog, SaveData, DiscardData, ReloadCatalog,
     DefaultPaths, BrowsePath, ApplyPaths,
     ChangeParameter, ChangeTexts, SetMode, Frame, ResetView, AxisView,
     LightSettings, BackgroundSettings, Wireframe,
@@ -50,6 +51,10 @@ struct WeaponUIState {
     WeaponPathState paths;
     bool setupOpen=true,iconEditorOpen=false;
     std::string search,parameterSearch;
+    // The shell accepts a catalog switch after flushing the current draft.
+    // Rows always belong to this accepted catalog; the UI never merges lists.
+    WeaponCatalog catalog=WeaponCatalog::Weapons;
+    bool forceCatalogTab=false;
     std::vector<WeaponRow> weapons;
     int selected=-1;
     std::vector<WeaponParameter> parameters;

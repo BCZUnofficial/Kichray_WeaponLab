@@ -79,6 +79,12 @@ bool replaceFile(const fs::path& staged,const fs::path& target){
 #endif
 }
 int integer(const std::map<std::string,WeaponValue>& values,const char* key,int fallback){const auto it=values.find(key);if(it==values.end())return fallback;std::vector<double> n;if(!ParseWeaponNumbers(it->second.value,n)||n.size()!=1||n[0]<0||n[0]>double(INT32_MAX)||std::floor(n[0])!=n[0])return fallback;return int(n[0]);}
+bool hasSuffix(const std::string& text,const std::string& suffix){return text.size()>=suffix.size()&&text.compare(text.size()-suffix.size(),suffix.size(),suffix)==0;}
+bool ammunitionClass(const std::string& cls){
+ // Native inventory-ammo factories in kichray/master. G_FAKE is a spawned
+ // projectile, while G_F1/G_RGD5 are hand grenades, not ammunition boxes.
+ return cls=="AMMO"||cls=="A_VOG25"||cls=="A_OG7B"||cls=="A_M209";
+}
 }
 
 bool ParseWeaponNumbers(const std::string& text,std::vector<double>& numbers){numbers.clear();auto parts=split(trim(text),',');if(parts.empty()||parts.size()>32)return false;for(const auto& p:parts){if(p.empty())return false;std::istringstream in(p);in.imbue(std::locale::classic());double value=0;in>>value;if(!in||!std::isfinite(value))return false;in>>std::ws;if(!in.eof())return false;numbers.push_back(value);}return true;}
@@ -94,31 +100,63 @@ struct WeaponDatabase::Impl {
  std::set<std::string> invalidSections;
  std::map<std::string,XMLItem> strings;
  size_t xmlDoc=0,xmlRootEnd=std::string::npos;
- std::vector<WeaponRecord> records;
- std::set<std::string> catalogSections;
+ std::vector<WeaponRecord> records,ammoRecords,allRecords;
+ std::map<std::string,WeaponItemKind> catalogSections;
  std::set<size_t> dirtyDocs;
  void updateDirty(size_t id){std::string bytes,error;if(!encodeDocument(docs[id],bytes,error)||bytes!=docs[id].original)dirtyDocs.insert(id);else dirtyDocs.erase(id);}
- void refreshLocalization(){for(auto& record:records){auto lookup=[&](const std::string& id){auto it=strings.find(id);return it==strings.end()?id:it->second.value;};record.name=lookup(record.nameId);record.description=lookup(record.descriptionId);record.label=record.name.empty()?record.section:record.name;}std::stable_sort(records.begin(),records.end(),[](const auto& a,const auto& b){return a.label==b.label?a.section<b.section:a.label<b.label;});}
+ void refreshLocalization(){
+  for(auto& record:allRecords){auto lookup=[&](const std::string& id){auto it=strings.find(id);return it==strings.end()?id:it->second.value;};record.name=lookup(record.nameId);record.description=lookup(record.descriptionId);record.label=record.name.empty()?record.section:record.name;}
+  std::stable_sort(allRecords.begin(),allRecords.end(),[](const auto& a,const auto& b){return a.label==b.label?a.section<b.section:a.label<b.label;});
+  records.clear();ammoRecords.clear();
+  for(const auto& record:allRecords)(record.kind==WeaponItemKind::Ammunition?ammoRecords:records).push_back(record);
+ }
  std::vector<std::string> warnings,loadWarnings;
  std::set<fs::path> loading;
  size_t ltxBytes=0;
  bool addDocument(const fs::path& path,size_t& index,std::string& error){const auto key=canonicalPath(path);auto old=documentIndex.find(key);if(old!=documentIndex.end()){index=old->second;return true;}Document d;d.path=key;if(!readFile(key,d.original)){error="Не удалось прочитать файл: "+pathString(path);return false;}if(!decodeDocument(d,error))return false;index=docs.size();docs.push_back(std::move(d));documentIndex[key]=index;return true;}
  bool loadLTX(const fs::path& file,std::string& error,size_t depth=0){const auto key=canonicalPath(file);if(loading.count(key)){loadWarnings.push_back("Цикл #include: "+pathString(file));return true;}if(documentIndex.count(key))return true;if(depth>64||docs.size()>4096){error="Слишком глубокое/большое дерево LTX.";return false;}size_t id;if(!addDocument(file,id,error))return false;ltxBytes+=docs[id].text.size();if(ltxBytes>128u*1024u*1024u){error="Объём конфигураций превышает 128 МиБ.";return false;}loading.insert(key);const auto fileLines=lines(docs[id].text);for(const auto& l:fileLines){auto s=trim(l.value.substr(0,commentAt(l.value)));if(s.compare(0,8,"#include")!=0)continue;auto name=unquote(trim(s.substr(8)));if(name.empty())continue;auto rel=assetPath(name);fs::path target=file.parent_path()/rel;std::error_code ec;if(!fs::is_regular_file(target,ec)){target=configDir/rel;ec.clear();}if(!fs::is_regular_file(target,ec)){loadWarnings.push_back("Не найден #include: "+pathString(file)+" → "+name);continue;}if(!loadLTX(target,error,depth+1))return false;}loading.erase(key);return true;}
- bool parse(std::string& error){warnings=loadWarnings;sections.clear();resolvedSections.clear();invalidSections.clear();strings.clear();records.clear();for(size_t i=0;i<docs.size();++i){if(i==xmlDoc)continue;Section* current=nullptr;for(const auto& line:lines(docs[i].text)){std::string name;std::vector<std::string> parents;if(sectionHeader(line.value,name,parents)){if(current)current->insert=line.begin;Section next;next.name=name;next.parents=std::move(parents);next.doc=i;next.insert=docs[i].text.size();auto inserted=sections.emplace(name,std::move(next));if(!inserted.second){inserted.first->second.duplicate=true;warnings.push_back("Дубликат секции, редактирование заблокировано: ["+name+"]");current=nullptr;}else current=&inserted.first->second;continue;}if(!current)continue;auto content=line.value.substr(0,commentAt(line.value));auto equal=content.find('=');if(equal==std::string::npos)continue;const auto key=trim(content.substr(0,equal));if(key.empty())continue;size_t begin=equal+1;while(begin<content.size()&&(content[begin]==' '||content[begin]=='\t'))++begin;size_t end=content.size();while(end>begin&&(content[end-1]==' '||content[end-1]=='\t'))--end;if(current->entries.count(key)){current->duplicate=true;warnings.push_back("Дублирующий ключ: ["+current->name+"] "+key);}current->entries[key]={content.substr(begin,end-begin),line.begin+begin,line.begin+end};}}
+ bool parse(std::string& error){warnings=loadWarnings;sections.clear();resolvedSections.clear();invalidSections.clear();strings.clear();records.clear();ammoRecords.clear();allRecords.clear();for(size_t i=0;i<docs.size();++i){if(i==xmlDoc)continue;Section* current=nullptr;for(const auto& line:lines(docs[i].text)){std::string name;std::vector<std::string> parents;if(sectionHeader(line.value,name,parents)){if(current)current->insert=line.begin;Section next;next.name=name;next.parents=std::move(parents);next.doc=i;next.insert=docs[i].text.size();auto inserted=sections.emplace(name,std::move(next));if(!inserted.second){inserted.first->second.duplicate=true;warnings.push_back("Дубликат секции, редактирование заблокировано: ["+name+"]");current=nullptr;}else current=&inserted.first->second;continue;}if(!current)continue;auto content=line.value.substr(0,commentAt(line.value));auto equal=content.find('=');if(equal==std::string::npos)continue;const auto key=trim(content.substr(0,equal));if(key.empty())continue;size_t begin=equal+1;while(begin<content.size()&&(content[begin]==' '||content[begin]=='\t'))++begin;size_t end=content.size();while(end>begin&&(content[end-1]==' '||content[end-1]=='\t'))--end;if(current->entries.count(key)){current->duplicate=true;warnings.push_back("Дублирующий ключ: ["+current->name+"] "+key);}current->entries[key]={content.substr(begin,end-begin),line.begin+begin,line.begin+end};}}
  if(!parseXML(docs[xmlDoc].text,strings,xmlRootEnd,error))return false;
  auto& cache=resolvedSections;std::set<std::string> stack;
  std::function<std::map<std::string,WeaponValue>(const std::string&)> resolve=[&](const std::string& name){auto cached=cache.find(name);if(cached!=cache.end())return cached->second;std::map<std::string,WeaponValue> values;auto it=sections.find(name);if(it==sections.end()){invalidSections.insert(name);warnings.push_back("Не найдена родительская секция: ["+name+"]");return values;}if(it->second.duplicate)invalidSections.insert(name);if(stack.size()>=128){invalidSections.insert(name);warnings.push_back("Слишком глубокое наследование: ["+name+"]");return values;}if(!stack.insert(name).second){invalidSections.insert(name);warnings.push_back("Цикл наследования: ["+name+"]");return values;}for(const auto& parent:it->second.parents){if(parent.empty())continue;for(auto value:resolve(parent))values[value.first]=std::move(value.second);if(invalidSections.count(parent))invalidSections.insert(name);}for(const auto& entry:it->second.entries)values[entry.first]={entry.first,entry.second.value,name,docs[it->second.doc].path,false};stack.erase(name);cache[name]=values;return values;};
- for(const auto& pair:sections){const auto& section=pair.second;auto values=resolve(section.name);auto get=[&](const char* key){auto it=values.find(key);return it==values.end()?std::string{}:unquote(it->second.value);};const auto cls=get("class");const bool weapon=section.name.compare(0,4,"wpn_")==0||cls.compare(0,3,"WP_")==0;if(!weapon||(get("visual").empty()&&get("inv_name").empty()&&!values.count("inv_grid_width")&&!values.count("inv_grid_height")&&!catalogSections.count(section.name))||(section.name.size()>=4&&section.name.compare(section.name.size()-4,4,"_hud")==0))continue;catalogSections.insert(section.name);WeaponRecord record;record.section=section.name;record.visual=get("visual");record.nameId=get("inv_name");record.shortNameId=get("inv_name_short");record.descriptionId=get("description");auto lookup=[&](const std::string& id){auto it=strings.find(id);return it==strings.end()?id:it->second.value;};record.name=lookup(record.nameId);record.description=lookup(record.descriptionId);record.label=record.name.empty()?record.section:record.name;record.sourceFile=docs[section.doc].path;record.iconX=integer(values,"inv_grid_x",0);record.iconY=integer(values,"inv_grid_y",0);record.iconWidth=integer(values,"inv_grid_width",1);record.iconHeight=integer(values,"inv_grid_height",1);for(auto entry:values){entry.second.inherited=entry.second.sourceSection!=record.section;record.values.push_back(std::move(entry.second));}records.push_back(std::move(record));}
- std::stable_sort(records.begin(),records.end(),[](const auto& a,const auto& b){return a.label==b.label?a.section<b.section:a.label<b.label;});return true;
+ std::set<std::string> parentSections;
+ for(const auto& pair:sections)for(const auto& parent:pair.second.parents)parentSections.insert(parent);
+ for(const auto& pair:sections){
+  const auto& section=pair.second;auto values=resolve(section.name);
+  auto get=[&](const char* key){auto it=values.find(key);return it==values.end()?std::string{}:unquote(it->second.value);};
+  const auto cls=trim(get("class"));const bool ammo=ammunitionClass(cls);
+  const bool weapon=section.name.compare(0,4,"wpn_")==0||cls.compare(0,3,"WP_")==0;
+  const auto name=lower(section.name);
+  const bool hud=hasSuffix(name,"_hud")||name.compare(0,4,"hud_")==0||name.find("_hud_")!=std::string::npos;
+  const bool templateName=hasSuffix(name,"_base")||hasSuffix(name,"_template")||name.compare(0,5,"base_")==0;
+  const auto spawn=section.entries.find("$spawn");
+  const bool ownSpawn=spawn!=section.entries.end()&&!unquote(spawn->second.value).empty();
+  const bool baseTemplate=templateName&&parentSections.count(section.name)&&!ownSpawn;
+  const auto previous=catalogSections.find(section.name);
+  if(previous==catalogSections.end()&&((!ammo&&!weapon)||cls=="G_FAKE"||hud||baseTemplate))continue;
+  // A concrete native ammo section stays editable even when its name/model
+  // is missing or has just been cleared. Its class identifies the catalog.
+  if(!ammo&&get("visual").empty()&&get("inv_name").empty()&&!values.count("inv_grid_width")&&!values.count("inv_grid_height")&&!catalogSections.count(section.name))continue;
+  // Keep a row in its current catalog while class/name/model are being typed.
+  // A fresh load/reload classifies the resulting configuration again.
+  WeaponRecord record;record.kind=previous!=catalogSections.end()?previous->second:(ammo?WeaponItemKind::Ammunition:WeaponItemKind::Weapon);
+  catalogSections.emplace(section.name,record.kind);
+  record.section=section.name;record.visual=get("visual");record.nameId=get("inv_name");record.shortNameId=get("inv_name_short");record.descriptionId=get("description");
+  record.sourceFile=docs[section.doc].path;record.iconX=integer(values,"inv_grid_x",0);record.iconY=integer(values,"inv_grid_y",0);record.iconWidth=integer(values,"inv_grid_width",1);record.iconHeight=integer(values,"inv_grid_height",1);
+  for(auto entry:values){entry.second.inherited=entry.second.sourceSection!=record.section;record.values.push_back(std::move(entry.second));}allRecords.push_back(std::move(record));
+ }
+ refreshLocalization();return true;
  }
 };
 WeaponDatabase::WeaponDatabase():impl_(new Impl){}
 WeaponDatabase::~WeaponDatabase()=default;
 WeaponDatabase::WeaponDatabase(WeaponDatabase&&) noexcept=default;
 WeaponDatabase& WeaponDatabase::operator=(WeaponDatabase&&) noexcept=default;
-bool WeaponDatabase::load(const fs::path& directory,const fs::path& table,std::string& error,const fs::path& extra){error.clear();auto next=std::make_unique<Impl>();try{std::error_code ec;if(!fs::is_directory(directory,ec)){error="Не найдена папка weapons: "+pathString(directory);return false;}next->weaponsDir=canonicalPath(directory);next->xmlPath=canonicalPath(table);next->configDir=next->weaponsDir.parent_path();next->extraRoot=extra.empty()?fs::path{}:canonicalPath(extra);if(!next->extraRoot.empty()&&!next->loadLTX(next->extraRoot,error))return false;std::vector<fs::path> files;for(fs::recursive_directory_iterator it(directory,ec),end;it!=end;it.increment(ec)){if(ec){error="Ошибка обхода weapons: "+ec.message();return false;}if(it->is_regular_file()&&lower(it->path().extension().u8string())==".ltx")files.push_back(it->path());}std::sort(files.begin(),files.end());for(const auto& file:files)if(!next->loadLTX(file,error))return false;if(!next->addDocument(table,next->xmlDoc,error))return false;if(!next->parse(error))return false;if(next->records.empty())next->warnings.push_back("Не найдены секции оружия с inv_name и visual.");impl_=std::move(next);return true;}catch(const std::exception& e){error=e.what();return false;}}
+bool WeaponDatabase::load(const fs::path& directory,const fs::path& table,std::string& error,const fs::path& extra){error.clear();auto next=std::make_unique<Impl>();try{std::error_code ec;if(!fs::is_directory(directory,ec)){error="Не найдена папка weapons: "+pathString(directory);return false;}next->weaponsDir=canonicalPath(directory);next->xmlPath=canonicalPath(table);next->configDir=next->weaponsDir.parent_path();next->extraRoot=extra.empty()?fs::path{}:canonicalPath(extra);if(!next->extraRoot.empty()&&!next->loadLTX(next->extraRoot,error))return false;std::vector<fs::path> files;for(fs::recursive_directory_iterator it(directory,ec),end;it!=end;it.increment(ec)){if(ec){error="Ошибка обхода weapons: "+ec.message();return false;}if(it->is_regular_file()&&lower(it->path().extension().u8string())==".ltx")files.push_back(it->path());}std::sort(files.begin(),files.end());for(const auto& file:files)if(!next->loadLTX(file,error))return false;if(!next->addDocument(table,next->xmlDoc,error))return false;if(!next->parse(error))return false;if(next->allRecords.empty())next->warnings.push_back("Не найдены секции оружия или боеприпасов для каталога.");impl_=std::move(next);return true;}catch(const std::exception& e){error=e.what();return false;}}
 const std::vector<WeaponRecord>& WeaponDatabase::weapons()const{return impl_->records;}
-const WeaponRecord* WeaponDatabase::find(const std::string& section)const{const auto it=std::find_if(impl_->records.begin(),impl_->records.end(),[&](const auto& r){return r.section==section;});return it==impl_->records.end()?nullptr:&*it;}
+const std::vector<WeaponRecord>& WeaponDatabase::ammunition()const{return impl_->ammoRecords;}
+const std::vector<WeaponRecord>& WeaponDatabase::items()const{return impl_->allRecords;}
+const WeaponRecord* WeaponDatabase::find(const std::string& section)const{const auto it=std::find_if(impl_->allRecords.begin(),impl_->allRecords.end(),[&](const auto& r){return r.section==section;});return it==impl_->allRecords.end()?nullptr:&*it;}
 bool WeaponDatabase::sectionValues(const std::string& section,WeaponConfigValues& values,std::string& error)const {
  values.clear();error.clear();
  if(!impl_->sections.count(section)){error="Не найдена секция LTX: ["+section+"]";return false;}

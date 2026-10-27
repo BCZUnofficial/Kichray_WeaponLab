@@ -1,5 +1,5 @@
 {
-  "version": "Kichray WeaponLab 0.2.0",
+  "version": "Kichray WeaponLab 0.3.0",
   "base": "Material Lab 0.13.0 restored sources",
   "engine_reference": {
     "repository": "https://github.com/BCZUnofficial/kichray",
@@ -38,7 +38,7 @@
   "compiler": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04) 13.3.0",
   "windows_compile": "not performed: native compiler and Windows SDK absent",
   "windows_run": "not performed; --smoke-test provided for native D3D11/WARP/WIC and mesh visibility checks",
-  "github_actions": "workflow supplied; no successful run asserted",
+  "github_actions": "current 0.3.0 workflow has not run; base 0.2.0 passed Windows and Linux CI, recorded separately",
   "retained_bytes": {
     "src/Renderer.cpp": {
       "matches_base": true,
@@ -95,26 +95,37 @@
     "src/OGF.cpp": "e1ae9bfca9da233a13ee6b0a8ebadc6ababcddb477d05bbe4894163d0b970fc7",
     "src/Resource.h": "3af575e3fc7ef9a2fc217eb33b7ccbaafa73bca45c240e8c6eec95c2983c9386",
     "src/ViewportTools.h": "bf750a28814d057f43dc4e794508be9023f792fb6fcc767b217e764cafd99489",
-    "src/WeaponData.cpp": "0bf4742cfada8a582751f6052a915d01641991bc244011f833d957cd7c167bcc",
-    "src/WeaponData.h": "5d3d78399a0a99e2b8d28761cdc041f356ce1db5d587249f25deb13d70842972",
-    "src/WeaponSimulation.cpp": "749357435b04c75cff475f6a097d060970f3c59bb15f9e6313dc2997e4012c78",
-    "src/WeaponSimulation.h": "414813036b90527f2ade6fc95db442f871f871b36030903894793af6c55c233c",
-    "src/WeaponUI.cpp": "65e93baa9c562726ec7325d5c9b61e44309485830cdf845484d482a164d5bcff",
-    "src/WeaponUI.h": "1ba2a7a30a52b1fc57c77542f9397906eb29d2518aa866a276dff4659c613e68",
+    "src/WeaponData.cpp": "9c821eaf0537aa7a108319ad0da3fa228a918b750e4a3fb258fe405b27b9b454",
+    "src/WeaponData.h": "7a72741f9b2fa82ddf9dd9b6e883bb9811ed77070bf356ab16c34ad7b4a907e3",
+    "src/WeaponSimulation.cpp": "38b3b25eb550b09fc0e6a1bb296fd20096b55091a1468179761a7a78373dc1e1",
+    "src/WeaponSimulation.h": "df7b86b010eb7a2ca8e0892fd36b78fcc01ced9e8faaa459c30d2b72d0a8a73a",
+    "src/WeaponUI.cpp": "79222a07c253a91e9ab7fc9066fd0d4ad154c5fb6f5ee9b546a9cd43af762a7e",
+    "src/WeaponUI.h": "9f75bd7189390d191277357f661ad38ffe1e82ce45df1915ed1c43ee78250dff",
     "tests/FlightInputTests.cpp": "bae12ce3ec80f30a604ef395bb6171a073296ea1db5133b7ed77729e4202955a",
     "tests/IconAtlasTests.cpp": "b14d3973acea180f8f2e0852312038e71ba2f66397118777cb287a8431193465",
     "tests/ParserTests.cpp": "1b816e0909722225bc60b03b4a882dd619041728933992732bca51425a3b7624",
     "tests/RendererPreviewTests.cpp": "fb1f1b6dde5ae222ed50471a5908f8d222246c85b3c0115c76085d105cb7d279",
     "tests/ViewportToolsTests.cpp": "e8900e838d3d3dcbca5082c21292adc31cd074443d07e1c5afb4be59f0dac953",
-    "tests/WeaponDataTests.cpp": "d877434a6a5c1022318c32d0a830cbfbbe2e0bfe59358dfac7ee8e6b5b28a8b3",
-    "tests/WeaponSimulationTests.cpp": "58eda2d88b895f8e8ca41500c97b5c0bef14a58344c7ae39514a87e3f23bdd66",
-    "tests/WeaponUITests.cpp": "25f35a183baf20e449b23468d4c97cead5761597130b35ea5ab142e5db357ef5"
+    "tests/WeaponDataTests.cpp": "8246f67c8126da2b147dd4c7ffe29e0f6c36796dbbc9a7464a9ad457493561eb",
+    "tests/WeaponSimulationTests.cpp": "2c11885caffd277e4ce78086f9f366f5609a9868f1d815a995f11aedde7460d3",
+    "tests/WeaponUITests.cpp": "aa892faa929e3fc93891c54dec35daf772c7b5b3c45335719646d5732866d4b5"
   },
   "windows_source_sha256": {
-    "src/WinApp.cpp": "cafea8ecf542805973edafdb973efb271d12c148a43bbe118452cea9c7c61975",
+    "src/WinApp.cpp": "52505ad393b8ede3f3750ac7b95d1d38607ed8970717fb66771677d69bf8526e",
     "src/Renderer.cpp": "5250e1f4ef9620df44077bc1dd4b9345b09bfd0648bf63d08c700c2236d0fc96",
     "src/Renderer.h": "656d980b26a0556dc9d8aef92cf7f513890b4fc2c5e1fc263100def96745523d",
     "src/StartupSplash.cpp": "8dc6fe8307743a488e4121aaf7e9e9748828634c304f6e9538304de1777e2c20",
     "src/StartupSplash.h": "dd50faa092ea9dd777d89033280ff3c70ecd16d0addec56abbc96028ef896181"
+  },
+  "base_0_2_ci": {
+    "commit": "19f07ccb6bdfaa8eebb92ff9813dae5094076bd5",
+    "run_id": 40493611408,
+    "url": "https://github.com/BCZUnofficial/Kichray_WeaponLab/actions/runs/40493611408",
+    "windows_job_id": 122153384109,
+    "windows_result": "success: MSVC configure/build, portable and native D3D11 WARP/PNG tests, executable artifact",
+    "linux_job_id": 122153383712,
+    "linux_result": "success: ASan/UBSan suites",
+    "applies_to_current_0_3_release": false,
+    "evidence": "GitHub run and jobs API inspected by parent agent; uploaded 0.2 tree matches the local 0.2 baseline"
   }
 }

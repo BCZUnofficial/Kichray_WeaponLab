@@ -13,7 +13,9 @@ struct WeaponValue {
     std::filesystem::path sourceFile;
     bool inherited=false;
 };
+enum class WeaponItemKind { Weapon,Ammunition };
 struct WeaponRecord {
+    WeaponItemKind kind=WeaponItemKind::Weapon;
     std::string section,label,visual,nameId,shortNameId,descriptionId;
     std::string name,description;
     std::filesystem::path sourceFile;
@@ -49,9 +51,15 @@ public:
     bool load(const std::filesystem::path& weaponsDirectory,
               const std::filesystem::path& stringTable,std::string& error,
               const std::filesystem::path& extraRoot={});
+    // Disjoint catalogs, sorted by localized label. items() contains their
+    // union exactly once and is suitable for shared atlas overlap checks.
+    // Existing rows retain their kind during edits; load/reload reclassifies
+    // them. Edits invalidate references/pointers into all catalog views.
     const std::vector<WeaponRecord>& weapons() const;
+    const std::vector<WeaponRecord>& ammunition() const;
+    const std::vector<WeaponRecord>& items() const;
     const WeaponRecord* find(const std::string& section) const;
-    // Includes non-catalog sections such as ammunition and [bullet_manager].
+    // Includes non-catalog sections such as templates and [bullet_manager].
     // Missing/duplicate sections and unresolved ancestry return an explicit error.
     bool sectionValues(const std::string& section,WeaponConfigValues& values,
                        std::string& error) const;

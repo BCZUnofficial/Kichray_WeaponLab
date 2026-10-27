@@ -36,6 +36,16 @@ lab::WeaponUIState fixture(){
     s.atlasWidth=s.atlasHeight=1024;s.atlasTexture=ImTextureID(2);s.snapshotTexture=ImTextureID(3);s.snapshotWidth=600;s.snapshotHeight=300;
     return s;
 }
+lab::WeaponUIState ammunitionFixture(){
+    auto s=fixture();s.catalog=lab::WeaponCatalog::Ammunition;s.forceCatalogTab=true;
+    s.weapons={{"ammo_5.45x39_fmj","5.45×39 обычный","weapons.ltx",false},{"ammo_5.45x39_ap","5.45×39 бронебойный","weapons.ltx",false}};
+    s.parameters.clear();
+    for(const auto& pair:std::vector<std::pair<std::string,std::string>>{{"box_size","30"},{"k_disp","1"},{"k_pierce","1.2"},{"k_ap","0.4"},{"impair","1"}})
+        s.parameters.push_back(lab::MakeWeaponParameter(pair.first,pair.second,"weapons.ltx"));
+    s.name="5.45×39 обычный";s.nameId="ammo-5.45x39-fmj";s.descriptionId="enc_weapons1_ammo-5.45x39-fmj";
+    s.description="Патроны калибра 5.45×39 мм. Параметры коробки и боеприпаса редактируются отдельно от оружия.";
+    s.modelName="weapons/ammo/ammo_545x39_fmj.ogf";return s;
+}
 void frame(lab::WeaponUIState& s,int w,int h,const lab::WeaponUICallback& action=[](lab::WeaponAction,int){}){
     auto& io=ImGui::GetIO();io.DisplaySize=ImVec2(float(w),float(h));ImGui::NewFrame();lab::DrawWeaponUI(s,action);ImGui::Render();}
 ImGuiWindow* findWindow(const char* name){for(auto* w:GImGui->Windows)if(w->Active&&std::string(w->Name).find(name)!=std::string::npos)return w;return nullptr;}
@@ -47,6 +57,8 @@ void geometry(){for(float scale:{1.f,1.5f}){Context ctx(scale);auto s=fixture();
         require(s.viewportRect.x+s.viewportRect.w<=s.inspectorRect.x+1,"viewport does not overlap inspector");
         require(s.inspectorRect.x+s.inspectorRect.w<=size.x,"inspector stays within display");
         require(s.tab==lab::WeaponTab(tab),"requested tab active");
+        auto* catalog=findWindow("CatalogPane");auto* bar=GImGui->TabBars.GetByKey(catalog->GetID("WeaponCatalog"));
+        require(bar&&bar->Tabs.Size==2&&bar->Tabs[0].Width+1>=bar->Tabs[0].ContentWidth&&bar->Tabs[1].Width+1>=bar->Tabs[1].ContentWidth,"both catalog labels fit at supported sizes and DPI");
     }
 }}
 void controls(){Context ctx;auto s=fixture();auto& io=ImGui::GetIO();
@@ -145,6 +157,45 @@ void simulation(){Context ctx;auto s=fixture();s.simulationAvailable=true;s.ammu
     frame(s,960,600);require(!s.viewportActive,"trajectory also isolates camera");
     s.simulationAvailable=false;frame(s,960,600);require(s.view==lab::WeaponView::Model,"nonfirearm always returns to model");
 }
+void ammunitionCatalog(){Context ctx;auto s=fixture();auto& io=ImGui::GetIO();
+    std::vector<std::pair<lab::WeaponAction,int>> actions;
+    auto step=[&]{frame(s,1490,900,[&](lab::WeaponAction a,int value){actions.emplace_back(a,value);});};
+    auto click=[&](ImVec2 point){io.AddMousePosEvent(point.x,point.y);step();io.AddMouseButtonEvent(0,true);step();io.AddMouseButtonEvent(0,false);step();};
+    auto hover=[&](ImGuiWindow* window,ImGuiID id){require(window!=nullptr,"catalog target window exists");
+        for(float y=window->Pos.y+5;y<window->Pos.y+window->Size.y-5;y+=3){io.AddMousePosEvent(window->Pos.x+30,y);step();if(GImGui->HoveredId==id)return io.MousePos;}
+        throw std::runtime_error("catalog target control not found");};
+    for(int i=0;i<4;++i)step();auto* pane=findWindow("CatalogPane");require(pane!=nullptr,"catalog pane exists");
+    auto* bar=GImGui->TabBars.GetByKey(pane->GetID("WeaponCatalog"));require(bar&&bar->Tabs.Size==2,"weapon and ammunition tabs are separate");
+    const auto ammoTabPoint=ImVec2(bar->BarRect.Min.x+bar->Tabs[1].Offset+bar->Tabs[1].Width*.5f,bar->BarRect.GetCenter().y);
+    click(ammoTabPoint);step();
+    require(s.catalog==lab::WeaponCatalog::Weapons&&s.weapons[0].section=="wpn_ak74","catalog click never replaces accepted rows or commits draft");
+    require(std::find(actions.begin(),actions.end(),std::make_pair(lab::WeaponAction::SelectCatalog,1))!=actions.end(),"ammunition tab requests shell catalog switch");
+    // Simulate a failed draft flush: the shell retains the old catalog and restores its tab.
+    s.forceCatalogTab=true;actions.clear();step();step();step();
+    require(bar->SelectedTabId==bar->Tabs[0].ID&&actions.empty(),"rejected switch restores weapon tab without another request");
+    // Simulate an accepted switch with the shell's filtered, unique ammunition rows.
+    s=ammunitionFixture();for(int i=0;i<4;++i)step();actions.clear();
+    require(bar->SelectedTabId==bar->Tabs[1].ID&&s.weapons.size()==2,"accepted ammunition catalog renders only supplied rows");
+    ImGui::NewFrame();ImGui::LogToBuffer();lab::DrawWeaponUI(s,[](lab::WeaponAction,int){});const std::string output=GImGui->LogBuffer.c_str();ImGui::LogFinish();ImGui::Render();
+    const auto meaning=lab::DescribeAmmunitionParameter("box_size");require(meaning.relevant&&!meaning.title.empty()&&output.find(meaning.title)!=std::string::npos,"ammunition-specific parameter explanation is rendered");
+    require(output.find("wpn_ak74")==std::string::npos&&output.find("ammo_5.45x39_fmj")!=std::string::npos,"weapon rows do not leak into ammunition tab");
+    require(output.find("ammo_5.45x39_fmj")==output.rfind("ammo_5.45x39_fmj"),"supplied ammo row is rendered once");
+    // A stale firearm result must never enable ammunition simulation or consume a camera view.
+    s.simulationAvailable=true;s.view=lab::WeaponView::Spread;step();require(s.view==lab::WeaponView::Model&&findWindow("SimulationScroll")==nullptr,"ammunition always keeps 3D viewport despite stale simulation state");
+    s.parameters={lab::MakeWeaponParameter("k_disp","1","weapons.ltx")};step();auto* inspector=findWindow("InspectorScroll");
+    const int zero=0;const auto row=inspector->GetID(zero);const auto component=ImHashData(&zero,sizeof(zero),row);const auto slider=ImHashStr("##StepSlider",0,component);
+    hover(inspector,slider);actions.clear();io.AddMouseWheelEvent(0,1);step();step();
+    require(s.parameters[0].value!="1"&&s.view==lab::WeaponView::Model,"ammo parameter wheel editing works without switching view");
+    require(std::none_of(actions.begin(),actions.end(),[](auto action){return action.first==lab::WeaponAction::FocusParameter||action.first==lab::WeaponAction::SimulationSettings;}),"ammo edits never request shooting simulation");
+    // Existing text, scene and icon workflows are reused for the selected ammo record.
+    s.tab=lab::WeaponTab::Texts;s.forceTab=true;step();step();require(findWindow("WrappedDescriptionEditor")!=nullptr,"ammunition uses wrapped text editor");
+    s.tab=lab::WeaponTab::Scene;s.forceTab=true;s.meshes={{"Ammo box",true}};step();step();require(s.meshes.size()==1,"ammo scene retains model parts");
+    s.iconEditorOpen=true;for(int i=0;i<3;++i)step();auto* icons=findWindow("IconControls");
+    click(hover(icons,icons->GetID("Сделать icon_snapshot")));
+    require(std::find(actions.begin(),actions.end(),std::make_pair(lab::WeaponAction::CaptureIcon,0))!=actions.end(),"ammo model can create icon snapshot");
+    click(hover(icons,icons->GetID("Выбрать иконку для патронов")));
+    require(std::find(actions.begin(),actions.end(),std::make_pair(lab::WeaponAction::ApplyIconRect,0))!=actions.end(),"ammo icon rectangle uses same apply workflow");
+}
 void snapshot(const std::string& path,int width,int height) {
     unsigned char* atlas=nullptr;int aw=0,ah=0;ImGui::GetIO().Fonts->GetTexDataAsRGBA32(&atlas,&aw,&ah);
     std::vector<unsigned char> rgb(size_t(width)*height*3,15);
@@ -196,6 +247,9 @@ void numeric(){
 int main(int argc,char** argv){try{
     if(argc>=5&&std::string(argv[1])=="--snapshot"){
         Context ctx;auto s=fixture();const int w=std::stoi(argv[3]),h=std::stoi(argv[4]);
+        if(argc>5&&std::string(argv[5]).find("ammo")==0){s=ammunitionFixture();
+            if(std::string(argv[5])=="ammo-text"){s.tab=lab::WeaponTab::Texts;s.forceTab=true;}
+            if(std::string(argv[5])=="ammo-icons")s.iconEditorOpen=true;}
         if(argc>5&&std::string(argv[5])=="icons")s.iconEditorOpen=true;
         if(argc>5&&std::string(argv[5])=="text"){s.tab=lab::WeaponTab::Texts;s.forceTab=true;for(int i=0;i<6;++i)s.description+=" Длинное описание оружия без искусственных переносов: точность и состояние зависят от конфигурации.";}
         if(argc>5&&std::string(argv[5])=="spread"){s.simulationAvailable=true;s.view=lab::WeaponView::Spread;s.ammunition={{"ammo_545","5.45 обычный"}};s.simulation.supported=s.simulation.spreadValid=true;s.simulation.magazineSize=30;s.simulation.roundsFired=30;s.simulation.rpm=600;s.simulation.maxConeRadius=.25;s.simulation.fireModes={1,3,-1};for(int i=0;i<30;++i)s.simulation.spread.push_back({.2*std::sin(i*3.2),.2*std::cos(i*1.6),i*.1,1,i,0});}
@@ -204,4 +258,4 @@ int main(int argc,char** argv){try{
         for(int i=0;i<5;++i)frame(s,w,h);
         snapshot(argv[2],w,h);return 0;
     }
-    numeric();geometry();controls();atlas();description();meshVisibility();simulation();std::cout<<"PASS: WeaponUI bidirectional wheel, wrapped UTF8 editing, arbitrary atlas, mesh visibility, simulation panes\n";return 0;}catch(const std::exception& e){std::cerr<<"FAIL: "<<e.what()<<'\n';return 1;}}
+    numeric();geometry();controls();atlas();description();meshVisibility();simulation();ammunitionCatalog();std::cout<<"PASS: WeaponUI bidirectional wheel, wrapped UTF8 editing, arbitrary atlas, mesh visibility, simulation panes, ammunition catalog\n";return 0;}catch(const std::exception& e){std::cerr<<"FAIL: "<<e.what()<<'\n';return 1;}}

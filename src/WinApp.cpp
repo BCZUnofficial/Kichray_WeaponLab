@@ -35,7 +35,7 @@ extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND,UINT,WPARAM,LP
 namespace {
 using Microsoft::WRL::ComPtr;
 namespace fs=std::filesystem;
-constexpr const wchar_t* AppTitle=L"Kichray WeaponLab 0.2.0";
+constexpr const wchar_t* AppTitle=L"Kichray WeaponLab 0.3.0";
 std::string utf8(const std::wstring& text) {
     if(text.empty())return {};
     int size=WideCharToMultiByte(CP_UTF8,0,text.data(),int(text.size()),nullptr,0,nullptr,nullptr);
@@ -182,8 +182,9 @@ class App {
     ComPtr<ID3D11ShaderResourceView> atlasView_,snapshotView_;
     lab::Image snapshot_,fitted_;
     std::string section_,queuedSelection_;
+    std::array<std::string,2> catalogSelection_,catalogSearch_,catalogParameterSearch_;
     std::set<std::string> editedIconSections_;
-    std::string simulationSection_;
+    std::string simulationSection_,lastSimulationAmmo_;
     bool textDraftPending_=false;
     bool ready_=false,running_=true,minimized_=false,viewportFocus_=false,dpiPending_=false;
     float dpi_=1.f;ULONGLONG lastTick_=0;
@@ -193,6 +194,9 @@ class App {
     void stopInput(){drag_=Drag::None;dragButton_=-1;flight_.Suspend();viewportFocus_=false;}
     void fail(const std::string& error){ui_.status=error;}
     const lab::WeaponRecord* current()const{return data_.find(section_);}
+    const std::vector<lab::WeaponRecord>& catalogRecords()const {
+        return ui_.catalog==lab::WeaponCatalog::Ammunition?data_.ammunition():data_.weapons();
+    }
     bool texture(const lab::Image& im,ComPtr<ID3D11ShaderResourceView>& out) {
         if(!im.valid()){out.Reset();return false;}
         D3D11_TEXTURE2D_DESC d{};d.Width=im.w;d.Height=im.h;d.MipLevels=1;d.ArraySize=1;
@@ -209,9 +213,16 @@ class App {
         ui_.atlasWidth=int(atlas_.image().w);ui_.atlasHeight=int(atlas_.image().h);
     }
     void refreshRows() {
+        if(const auto* record=current()){
+            const auto actual=record->kind==lab::WeaponItemKind::Ammunition?lab::WeaponCatalog::Ammunition:lab::WeaponCatalog::Weapons;
+            if(actual!=ui_.catalog){
+                catalogSearch_[size_t(ui_.catalog)]=ui_.search;catalogParameterSearch_[size_t(ui_.catalog)]=ui_.parameterSearch;
+                ui_.catalog=actual;ui_.forceCatalogTab=true;ui_.search=catalogSearch_[size_t(actual)];ui_.parameterSearch=catalogParameterSearch_[size_t(actual)];
+            }
+        }
         ui_.weapons.clear();ui_.selected=-1;
         const auto root=fs::u8path(loadedPaths_.values[4]);
-        for(const auto& w:data_.weapons()) {
+        for(const auto& w:catalogRecords()) {
             std::error_code ec;const auto model=assetPath(root,w.visual,L".ogf","meshes/");
             ui_.weapons.push_back({w.section,w.label,w.sourceFile.u8string(),model.empty()||!fs::is_regular_file(model,ec)});
             if(w.section==section_)ui_.selected=int(ui_.weapons.size()-1);
@@ -219,9 +230,10 @@ class App {
     }
     void updateSimulation() {
         lab::SimulationConfig weapon,physics;std::string error;
-        const std::string priorAmmo=ui_.selectedAmmoIndex>=0&&size_t(ui_.selectedAmmoIndex)<ui_.ammunition.size()?ui_.ammunition[size_t(ui_.selectedAmmoIndex)].section:std::string{};
+        if(ui_.selectedAmmoIndex>=0&&size_t(ui_.selectedAmmoIndex)<ui_.ammunition.size())lastSimulationAmmo_=ui_.ammunition[size_t(ui_.selectedAmmoIndex)].section;
+        const std::string priorAmmo=lastSimulationAmmo_;
         ui_.ammunition.clear();ui_.simulation={};ui_.simulationAvailable=false;
-        if(!current()){simulationSection_.clear();ui_.view=lab::WeaponView::Model;return;}
+        if(!current()||ui_.catalog==lab::WeaponCatalog::Ammunition){simulationSection_.clear();ui_.view=lab::WeaponView::Model;return;}
         if(!data_.sectionValues(section_,weapon,error)){ui_.simulation.error=error;ui_.view=lab::WeaponView::Model;return;}
         ui_.simulationAvailable=lab::IsSimulationFirearm(weapon);
         if(!ui_.simulationAvailable){ui_.view=lab::WeaponView::Model;return;}
@@ -300,9 +312,31 @@ class App {
         return true;
     }
     void select(int index) {
+        if(index<0||size_t(index)>=ui_.weapons.size())return;
+        const auto chosen=ui_.weapons[size_t(index)].section;
         if(!flushPendingParameters()||!flushPendingTexts())return;
-        if(index<0||size_t(index)>=data_.weapons().size())return;
-        stopInput();section_=data_.weapons()[size_t(index)].section;ui_.selected=index;refreshCurrent();loadModel();
+        if(!data_.find(chosen))return;
+        stopInput();section_=chosen;catalogSelection_[size_t(ui_.catalog)]=chosen;
+        ui_.descriptionEdit={};refreshRows();refreshCurrent();loadModel();
+    }
+    void selectCatalog(int value) {
+        if(value<0||value>1||value==int(ui_.catalog))return;
+        // Reject a tab switch without losing an invalid parameter/text draft.
+        ui_.forceCatalogTab=true;
+        if(!flushPendingParameters()||!flushPendingTexts())return;
+        const size_t previous=size_t(ui_.catalog);
+        catalogSelection_[previous]=section_;catalogSearch_[previous]=ui_.search;
+        catalogParameterSearch_[previous]=ui_.parameterSearch;
+        stopInput();ui_.catalog=lab::WeaponCatalog(value);ui_.search=catalogSearch_[size_t(value)];
+        ui_.parameterSearch=catalogParameterSearch_[size_t(value)];ui_.descriptionEdit={};
+        section_=catalogSelection_[size_t(value)];
+        const auto& records=catalogRecords();
+        if(std::none_of(records.begin(),records.end(),[&](const lab::WeaponRecord& record){return record.section==section_;}))
+            section_=records.empty()?std::string{}:records.front().section;
+        catalogSelection_[size_t(value)]=section_;
+        refreshRows();refreshCurrent();
+        if(current())loadModel();
+        else ui_.status=ui_.catalog==lab::WeaponCatalog::Ammunition?"Патроны в загруженных конфигах не найдены.":"Оружие в загруженных конфигах не найдено.";
     }
     void defaults() {
         fs::path root=fs::u8path(ui_.paths.values[0]);
@@ -355,9 +389,11 @@ class App {
         if(!nextAtlas.load(fs::u8path(ui_.paths.values[3]),error)){fail("Атлас: "+error);ui_.setupOpen=true;return false;}
         data_=std::move(next);atlas_=std::move(nextAtlas);loadedPaths_=ui_.paths;
         ui_.warning.clear();for(const auto& warning:data_.warnings()){if(ui_.warning.size()>3000){ui_.warning+="\n…";break;}ui_.warning+=warning+"\n";}
-        section_.clear();editedIconSections_.clear();textDraftPending_=false;ui_.parameters.clear();ui_.name.clear();ui_.description.clear();ui_.nameId.clear();ui_.descriptionId.clear();
+        section_.clear();queuedSelection_.clear();catalogSelection_={};catalogSearch_={};catalogParameterSearch_={};lastSimulationAmmo_.clear();simulationSection_.clear();ui_.ammunition.clear();
+        ui_.catalog=lab::WeaponCatalog::Weapons;ui_.forceCatalogTab=true;ui_.search.clear();ui_.parameterSearch.clear();ui_.descriptionEdit={};
+        editedIconSections_.clear();textDraftPending_=false;ui_.parameters.clear();ui_.name.clear();ui_.description.clear();ui_.nameId.clear();ui_.descriptionId.clear();
         clearModel();refreshRows();updateSimulation();updateAtlas();ui_.setupOpen=false;rememberPaths();
-        ui_.status="Найдено оружия: "+std::to_string(ui_.weapons.size())+". Выберите оружие слева.";
+        ui_.status="Найдено оружия: "+std::to_string(data_.weapons().size())+", типов патронов: "+std::to_string(data_.ammunition().size())+". Выберите вкладку и предмет слева.";
         return true;
     }
     void lighting() {
@@ -376,7 +412,7 @@ class App {
         editedIconSections_.insert(section_);refreshCurrent();ui_.status="Координаты иконки изменены в конфиге. Нажмите «Сохранить».";return true;
     }
     void capture() {
-        if(!ui_.hasModel){fail("Сначала загрузите world-модель оружия.");return;}
+        if(!ui_.hasModel){fail("Сначала загрузите world-модель выбранного оружия или патронов.");return;}
         std::wstring error;
         if(!renderer_.CaptureTransparent(snapshot_,1024,error)){fail(utf8(error));return;}
         if(!previewSnapshot())return;ui_.status="icon_snapshot готов: прозрачный фон, текущие камера и свет. Выберите ячейки и вставьте снимок.";
@@ -388,20 +424,21 @@ class App {
         ui_.hasSnapshot=true;ui_.snapshotWidth=int(fitted_.w);ui_.snapshotHeight=int(fitted_.h);return true;
     }
     void stageIcon() {
-        if(!current()||!previewSnapshot())return;
+        if(!current()||!flushPendingParameters()||!flushPendingTexts()||!previewSnapshot())return;
         std::string error;const auto rect=selectedRect();bool occupied=false;
         auto cropped=lab::CropIcon(atlas_.image(),rect,atlas_.grid,error);
         for(const auto p:cropped.pixels)if(p.a){occupied=true;break;}
         std::wstring warning=L"Выбранная область атласа будет заменена целиком, включая прозрачные пиксели.\n";
         int shared=0;
-        for(const auto& w:data_.weapons())if(w.section!=section_&&overlaps(rect,{w.iconX,w.iconY,w.iconWidth,w.iconHeight})){
+        for(const auto& w:data_.items())if(w.section!=section_&&overlaps(rect,{w.iconX,w.iconY,w.iconWidth,w.iconHeight})){
             if(shared<8)warning+=L"\n"+wide(w.label)+L" ["+wide(w.section)+L"]";++shared;
         }
-        if(shared)warning+=L"\n\nЭти виды оружия используют пересекающиеся ячейки.";
-        warning+=L"\n\nДругие предметы вне каталога weapons также могут использовать эту область.\nВставить снимок?";
+        if(shared)warning+=L"\n\nЭто оружие или патроны используют пересекающиеся ячейки.";
+        warning+=L"\n\nПредметы вне каталогов оружия и патронов также могут использовать эту область.\nВставить снимок?";
         if((occupied||shared)&&MessageBoxW(window_,warning.c_str(),AppTitle,MB_YESNO|MB_DEFBUTTON2|MB_ICONQUESTION)!=IDYES)return;
+        if(!applyRect())return;
         if(!atlas_.replace(rect,fitted_,error)){fail(error);return;}
-        updateAtlas();if(!applyRect())return;
+        updateAtlas();
         ui_.status="Снимок вставлен в рабочую копию атласа, координаты внесены в конфиг. Нажмите «Сохранить».";
     }
     bool hasPendingParameters()const {for(const auto& p:ui_.parameters)if(p.pending)return true;return false;}
@@ -422,10 +459,11 @@ class App {
     void action(lab::WeaponAction what,int value) {
         using A=lab::WeaponAction;std::string error;
         switch(what){
+        case A::SelectCatalog:selectCatalog(value);break;
         case A::SelectWeapon:
             if(!queuedSelection_.empty()){
                 const auto chosen=queuedSelection_;queuedSelection_.clear();if(!flushPendingParameters()||!flushPendingTexts())break;
-                if(data_.find(chosen)){stopInput();section_=chosen;refreshRows();refreshCurrent();loadModel();}
+                if(data_.find(chosen)){stopInput();section_=chosen;catalogSelection_[size_t(ui_.catalog)]=chosen;ui_.descriptionEdit={};refreshRows();refreshCurrent();loadModel();}
             }else select(value);break;
         case A::SaveData:saveData();break;
         case A::DiscardData:
