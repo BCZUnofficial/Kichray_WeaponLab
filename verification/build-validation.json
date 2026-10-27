@@ -1,0 +1,77 @@
+{
+  "version": "Kichray WeaponLab 0.1.0",
+  "base": "Material Lab 0.13.0 restored sources",
+  "portable_suites": {
+    "passed": 7,
+    "failed": 0
+  },
+  "asan_ubsan_suites": {
+    "passed": 7,
+    "failed": 0,
+    "leak_sanitizer": "disabled via ASAN_OPTIONS=detect_leaks=0"
+  },
+  "compiler": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04) 13.3.0",
+  "windows_compile": "not performed: native compiler/SDK absent; cross compiler installation unavailable (package endpoints HTTP503)",
+  "windows_run": "not performed; --smoke-test provided for native D3D11/WARP/WIC checks",
+  "retained_bytes": {
+    "assets/MaterialLab.ico": {
+      "matches_base": true,
+      "sha256": "95084b74ea0c9025676ebe960485f17b02c51f08bf0f50754142f1ac46a182c7"
+    },
+    "assets/MaterialLab.png": {
+      "matches_base": true,
+      "sha256": "2485021aa7bf69892d207cc5f8c36775e2dbbc52343ce1898ca97745841fc4bb"
+    },
+    "assets/StartupSplash.png": {
+      "matches_base": true,
+      "sha256": "c333f113f5aaff9f0481a6d88e61b7853c40b990ce550d7d3b41baf3db6ebb85"
+    },
+    "assets/Preview.hlsl": {
+      "matches_base": true,
+      "sha256": "7696abe22f58dd488a8677c5f54a44f0f41b9558d813d0113a36d6c2e1462174"
+    },
+    "src/Renderer.cpp": {
+      "matches_base": true,
+      "sha256": "5250e1f4ef9620df44077bc1dd4b9345b09bfd0648bf63d08c700c2236d0fc96"
+    },
+    "src/Renderer.h": {
+      "matches_base": true,
+      "sha256": "656d980b26a0556dc9d8aef92cf7f513890b4fc2c5e1fc263100def96745523d"
+    },
+    "src/FlightInput.h": {
+      "matches_base": true,
+      "sha256": "763eb2ad1074c3f355fdd747dbdbe12980908f1e69298b60512000a069781b27"
+    }
+  },
+  "portable_source_sha256": {
+    "src/AttachmentPreview.h": "1a36e208b12813d2f2fa71b31480b970b9e28347049279455a4dfc79fa8949cc",
+    "src/Core.cpp": "c83bf32173b94374fb37c64f0264c9cfd569a5812de7a2f752c1b7a4cc3bd55a",
+    "src/Core.h": "156c01fbfe7ec3807d83306cc8b4af68b0adaca4f002e9ee56dde3b06d9286f1",
+    "src/DDS.cpp": "194925013edab279db492b8248a0b9cf028f26cb4bd92544cef4694b0a5e45b8",
+    "src/EngineLighting.h": "f310e545f960b69b2f983985e11d5f847d367a775658b1e059c70b96560d1fc6",
+    "src/EngineTexture.h": "05b69ca433d26c687eb78c645aac2b56cae596f78678647ab64001e2c49bfe97",
+    "src/FlightInput.h": "763eb2ad1074c3f355fdd747dbdbe12980908f1e69298b60512000a069781b27",
+    "src/IconAtlas.cpp": "e57709f772f0389c9b89b037cbcceb16716df4733db9ef820fccd98bfb2ea69a",
+    "src/IconAtlas.h": "372e4b423667bc251e9a2d398a0d45c461061a47f8b502e5d24a08ac6d0251e0",
+    "src/MaterialAlpha.h": "a9c47518c7166b556827eb7ebbd130768c23cecd94794222c09bba3412c66572",
+    "src/OGF.cpp": "e1ae9bfca9da233a13ee6b0a8ebadc6ababcddb477d05bbe4894163d0b970fc7",
+    "src/Resource.h": "3af575e3fc7ef9a2fc217eb33b7ccbaafa73bca45c240e8c6eec95c2983c9386",
+    "src/ViewportTools.h": "bf750a28814d057f43dc4e794508be9023f792fb6fcc767b217e764cafd99489",
+    "src/WeaponData.cpp": "221d6f235f60e69b2f83146ca99650de26aa1d7209fae454da7f06473922d47c",
+    "src/WeaponData.h": "d8df7141a3a20573edab3aa26f99af905c989f9c3a2905c6314a86d1a04a07aa",
+    "src/WeaponUI.cpp": "5a20bd980199975f5cd034cde52dc6b9c2258e0e67cca6100f74acf274c014e3",
+    "src/WeaponUI.h": "8647d5abe82061fc7333a53f529a724df9ecd0082d7625234257bfebb0085bfc",
+    "tests/FlightInputTests.cpp": "bae12ce3ec80f30a604ef395bb6171a073296ea1db5133b7ed77729e4202955a",
+    "tests/IconAtlasTests.cpp": "553a283adafac6cfa72fd38ce2ddaf1960222dd83abb5c48146bf0844efed017",
+    "tests/ParserTests.cpp": "128c351c132f5a2e4b9cf2da73b5b2bf4d567556e780187d4e185d22774c7c8f",
+    "tests/RendererPreviewTests.cpp": "fb1f1b6dde5ae222ed50471a5908f8d222246c85b3c0115c76085d105cb7d279",
+    "tests/ViewportToolsTests.cpp": "e8900e838d3d3dcbca5082c21292adc31cd074443d07e1c5afb4be59f0dac953",
+    "tests/WeaponDataTests.cpp": "db4a90e491858a26774b73906f08576fac4ab0bf4db28b5b46d558ca5894114e",
+    "tests/WeaponUITests.cpp": "3aba60b867cd73e98c847cab3295040ae6d97ceb4374d114ace71e038a6c64eb"
+  },
+  "windows_source_sha256": {
+    "src/WinApp.cpp": "2080d450979799d4383498d55ee6d3ac996d35295d68e3d96a3635fc6f795831",
+    "src/Renderer.cpp": "5250e1f4ef9620df44077bc1dd4b9345b09bfd0648bf63d08c700c2236d0fc96",
+    "src/Renderer.h": "656d980b26a0556dc9d8aef92cf7f513890b4fc2c5e1fc263100def96745523d"
+  }
+}

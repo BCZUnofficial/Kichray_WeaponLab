@@ -1,0 +1,20 @@
+{
+  "unchanged_renderer_assets": [
+    "src/Renderer.cpp",
+    "src/Renderer.h",
+    "src/FlightInput.h",
+    "src/StartupSplash.cpp",
+    "src/StartupSplash.h",
+    "src/OGF.cpp",
+    "src/DDS.cpp",
+    "assets/Preview.hlsl",
+    "assets/MaterialLab.ico",
+    "assets/MaterialLab.png",
+    "assets/StartupSplash.png"
+  ],
+  "all_cpp_in_project": true,
+  "all_ui_actions_handled": true,
+  "new_app": "Kichray WeaponLab 0.1.0",
+  "source_base": "restored MaterialLab 0.13.0; original base 9d0be1aa320651207d7922d712e0741922ea6aa1 + user patch",
+  "windows_compile_and_run": false
+}

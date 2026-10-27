@@ -1,0 +1,74 @@
+cmake_minimum_required(VERSION 3.16)
+project(KichrayWeaponLab VERSION 0.1.0 LANGUAGES CXX)
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+option(WEAPONLAB_BUILD_TESTS "Build portable production-code checks" ON)
+option(WEAPONLAB_SANITIZERS "Enable ASan and UBSan for portable checks" OFF)
+if(MSVC)
+    add_compile_options(/utf-8 /EHsc /UNDEBUG)
+    add_compile_definitions(NOMINMAX WIN32_LEAN_AND_MEAN)
+else()
+    add_compile_options(-UNDEBUG)
+endif()
+if(WEAPONLAB_SANITIZERS)
+    if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang" AND NOT WIN32)
+        add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer)
+        add_link_options(-fsanitize=address,undefined)
+    else()
+        message(FATAL_ERROR "WEAPONLAB_SANITIZERS requires GCC or Clang on a non-Windows host")
+    endif()
+endif()
+add_library(weapon_core STATIC
+    src/Core.cpp src/DDS.cpp src/OGF.cpp src/WeaponData.cpp src/IconAtlas.cpp)
+target_include_directories(weapon_core PUBLIC src)
+add_library(imgui_core STATIC
+    third_party/imgui/imgui.cpp third_party/imgui/imgui_draw.cpp
+    third_party/imgui/imgui_tables.cpp third_party/imgui/imgui_widgets.cpp)
+target_include_directories(imgui_core PUBLIC third_party/imgui)
+add_library(weapon_ui STATIC src/WeaponUI.cpp)
+target_link_libraries(weapon_ui PUBLIC weapon_core imgui_core)
+if(WIN32)
+    enable_language(RC)
+    add_executable(WeaponLab WIN32
+        src/WinApp.cpp src/Renderer.cpp src/StartupSplash.cpp
+        third_party/imgui/backends/imgui_impl_win32.cpp
+        third_party/imgui/backends/imgui_impl_dx11.cpp
+        assets/MaterialLab.rc)
+    target_include_directories(WeaponLab PRIVATE third_party/imgui/backends assets)
+    target_compile_definitions(WeaponLab PRIVATE UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN)
+    target_link_libraries(WeaponLab PRIVATE weapon_ui
+        d3d11 dxgi d3dcompiler windowscodecs ole32 comctl32 comdlg32
+        shell32 uuid user32 gdi32 dwmapi imm32)
+    if(MSVC)
+        target_link_options(WeaponLab PRIVATE
+            "/MANIFEST:EMBED" "/MANIFESTINPUT:${CMAKE_CURRENT_SOURCE_DIR}/assets/MaterialLab.manifest")
+    elseif(MINGW)
+        target_link_options(WeaponLab PRIVATE -municode)
+    endif()
+    add_custom_command(TARGET WeaponLab POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:WeaponLab>/assets"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${CMAKE_CURRENT_SOURCE_DIR}/assets/Preview.hlsl"
+            "$<TARGET_FILE_DIR:WeaponLab>/assets/Preview.hlsl")
+endif()
+if(WEAPONLAB_BUILD_TESTS)
+    enable_testing()
+    function(weaponlab_test target source)
+        add_executable(${target} ${source})
+        target_link_libraries(${target} PRIVATE weapon_core)
+        add_test(NAME ${target} COMMAND ${target})
+        set_tests_properties(${target} PROPERTIES TIMEOUT 180)
+    endfunction()
+    weaponlab_test(viewport-tests tests/ViewportToolsTests.cpp)
+    weaponlab_test(parser-tests tests/ParserTests.cpp)
+    weaponlab_test(flight-input-tests tests/FlightInputTests.cpp)
+    weaponlab_test(renderer-preview-tests tests/RendererPreviewTests.cpp)
+    weaponlab_test(weapon-data-tests tests/WeaponDataTests.cpp)
+    weaponlab_test(icon-atlas-tests tests/IconAtlasTests.cpp)
+    weaponlab_test(weapon-ui-tests tests/WeaponUITests.cpp)
+    target_link_libraries(weapon-ui-tests PRIVATE weapon_ui)
+    if(WIN32)
+        add_test(NAME windows-renderer-smoke COMMAND $<TARGET_FILE:WeaponLab> --smoke-test)
+        set_tests_properties(windows-renderer-smoke PROPERTIES TIMEOUT 180)
+    endif()
