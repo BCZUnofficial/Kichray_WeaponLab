@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(KichrayWeaponLab VERSION 0.3.0 LANGUAGES CXX)
+project(KichrayWeaponLab VERSION 0.4.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -20,7 +20,7 @@ if(WEAPONLAB_SANITIZERS)
     endif()
 endif()
 add_library(weapon_core STATIC
-    src/Core.cpp src/DDS.cpp src/OGF.cpp src/WeaponData.cpp src/IconAtlas.cpp src/WeaponSimulation.cpp)
+    src/Core.cpp src/DDS.cpp src/OGF.cpp src/WeaponData.cpp src/IconAtlas.cpp src/WeaponSimulation.cpp src/WeaponHUD.cpp src/ParticleLibrary.cpp)
 target_include_directories(weapon_core PUBLIC src)
 add_library(imgui_core STATIC
     third_party/imgui/imgui.cpp third_party/imgui/imgui_draw.cpp
@@ -31,7 +31,7 @@ target_link_libraries(weapon_ui PUBLIC weapon_core imgui_core)
 if(WIN32)
     enable_language(RC)
     add_executable(WeaponLab WIN32
-        src/WinApp.cpp src/Renderer.cpp src/StartupSplash.cpp
+        src/WinApp.cpp src/Renderer.cpp src/RendererParticles.cpp src/StartupSplash.cpp
         third_party/imgui/backends/imgui_impl_win32.cpp
         third_party/imgui/backends/imgui_impl_dx11.cpp
         assets/MaterialLab.rc)
@@ -67,6 +67,7 @@ if(WEAPONLAB_BUILD_TESTS)
     weaponlab_test(weapon-data-tests tests/WeaponDataTests.cpp)
     weaponlab_test(icon-atlas-tests tests/IconAtlasTests.cpp)
     weaponlab_test(weapon-simulation-tests tests/WeaponSimulationTests.cpp)
+    weaponlab_test(weapon-hud-tests tests/WeaponHUDTests.cpp)
     weaponlab_test(weapon-ui-tests tests/WeaponUITests.cpp)
     target_link_libraries(weapon-ui-tests PRIVATE weapon_ui)
     if(WIN32)

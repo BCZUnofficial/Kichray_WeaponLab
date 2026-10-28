@@ -63,6 +63,7 @@ public:
     // Missing/duplicate sections and unresolved ancestry return an explicit error.
     bool sectionValues(const std::string& section,WeaponConfigValues& values,
                        std::string& error) const;
+    bool sectionParameters(const std::string& section,std::vector<WeaponValue>& values,std::string& error) const;
     // Returns ammo_class in configuration order, including unavailable IDs so
     // the UI can show the problem instead of silently choosing a different round.
     std::vector<WeaponAmmoRecord> ammunitionForWeapon(const std::string& section) const;

@@ -178,10 +178,24 @@ void catalog(WeaponUIState& s,const WeaponUICallback& action) {
 void parameterPane(WeaponUIState& s,const WeaponUICallback& action) {
     ImGui::SetNextItemWidth(-1);textInput("##ParameterSearch",s.parameterSearch);tip("Фильтр параметров по имени");
     ImGui::TextWrapped("Ползунки изменяют значение дискретно. Шаг и границы задаются с клавиатуры.");
-    for(size_t i=0;i<s.parameters.size();++i){auto& p=s.parameters[i];if(!contains(p.key,s.parameterSearch))continue;
+    const bool hud=s.view==WeaponView::Hud;
+    if(hud){ImGui::TextWrapped("Секция HUD: [%s]",s.hudSection.c_str());
+        if(!s.hudWarning.empty())ImGui::TextWrapped("%s",s.hudWarning.c_str());}
+    auto& parameters=hud?s.hudParameters:s.parameters;
+    std::vector<ParameterGroup> groups;
+    for(const auto& p:parameters){auto g=ClassifyWeaponParameter(p.key,hud);if(contains(p.key,s.parameterSearch)&&std::find(groups.begin(),groups.end(),g)==groups.end())groups.push_back(g);}
+    int expand=0;if(ImGui::Button("Развернуть всё"))expand=1;
+    if(ImGui::GetItemRectMax().x+ImGui::CalcTextSize("Свернуть всё").x+ImGui::GetStyle().FramePadding.x*2+ImGui::GetStyle().ItemSpacing.x<ImGui::GetWindowPos().x+ImGui::GetWindowSize().x-ImGui::GetStyle().WindowPadding.x)ImGui::SameLine();
+    if(ImGui::Button("Свернуть всё"))expand=-1;
+    for(auto group:groups){int count=0;for(const auto& p:parameters)if(ClassifyWeaponParameter(p.key,hud)==group&&contains(p.key,s.parameterSearch))++count;
+        if(expand||!s.parameterSearch.empty())ImGui::SetNextItemOpen(expand>=0,ImGuiCond_Always);
+        const std::string label=std::string(ParameterGroupTitle(group))+" ("+std::to_string(count)+")###Group"+std::to_string(int(group))+(hud?"HUD":"Item");
+        if(!ImGui::CollapsingHeader(label.c_str(),ImGuiTreeNodeFlags_DefaultOpen))continue;
+    for(size_t i=0;i<parameters.size();++i){auto& p=parameters[i];if(ClassifyWeaponParameter(p.key,hud)!=group||!contains(p.key,s.parameterSearch))continue;
         ImGui::PushID(int(i));ImGui::Separator();ImGui::TextWrapped("%s%s",p.key.c_str(),p.inherited?"  [наследуется]":"");tip(p.source);
         const auto meaning=s.catalog==WeaponCatalog::Ammunition?DescribeAmmunitionParameter(p.key):DescribeSimulationParameter(p.key);
-        if(meaning.relevant||s.catalog==WeaponCatalog::Ammunition){
+        if(hud){const auto help=HudParameterHelp(p.key);if(!help.empty())ImGui::TextWrapped("%s",help.c_str());}
+        if(!hud&&(meaning.relevant||s.catalog==WeaponCatalog::Ammunition)){
             if(!meaning.title.empty()){ImGui::TextWrapped("%s",meaning.title.c_str());tip(meaning.description);}
             if(!meaning.effect.empty())ImGui::TextWrapped("%s",meaning.effect.c_str());}
         bool changed=false,activated=false;
@@ -192,6 +206,7 @@ void parameterPane(WeaponUIState& s,const WeaponUICallback& action) {
             const bool sliderAvailable=count>=1&&count<=1000000;
             for(size_t component=0;component<p.numbers.size();++component){
                 ImGui::PushID(int(component));const double value=p.numbers[component];
+                if(p.numbers.size()==3)ImGui::TextDisabled("%s",p.key=="orientation"?(component==0?"Heading (Y), °":component==1?"Pitch (X), °":"Bank (Z), °"):(component==0?"X":component==1?"Y":"Z"));
                 if(sliderAvailable){const int ticks=int(count);int tick=int(std::clamp(std::round((value-p.minimum)/p.step),0.0,double(ticks)));
                     const std::string display=numberText(value,p.integer);
                     ImGui::SetNextItemWidth(-1);
@@ -222,13 +237,55 @@ void parameterPane(WeaponUIState& s,const WeaponUICallback& action) {
         }
         activated|=ImGui::IsItemActivated();
         tip("Точное значение. Числовые векторы разделяются запятыми. Ошибочный ввод остаётся черновиком и блокирует сохранение.");
-        if(meaning.relevant&&s.catalog==WeaponCatalog::Weapons&&s.simulationAvailable&&(activated||changed)){
+        if(!hud&&meaning.relevant&&s.catalog==WeaponCatalog::Weapons&&s.simulationAvailable&&(activated||changed)){
             s.view=(p.key=="bullet_speed"||p.key=="fire_distance")?WeaponView::Trajectory:WeaponView::Spread;
             action(WeaponAction::FocusParameter,int(i));
         }
-        if(changed){p.pending=true;action(WeaponAction::ChangeParameter,int(i));}
+        if(changed){p.pending=true;action(hud?WeaponAction::ChangeHudParameter:WeaponAction::ChangeParameter,int(i));}
         ImGui::PopID();
+    }}
+}
+void effectPane(WeaponUIState& s,const WeaponUICallback& action) {
+    if(s.catalog!=WeaponCatalog::Weapons){ImGui::TextWrapped("Эффекты выстрела настраиваются у оружия.");return;}
+    ImGui::TextWrapped("%s",s.particleLibraryStatus.c_str());
+    if(fullButton("Перечитать particles.xr"))action(WeaponAction::ReloadEffects,0);
+    ImGui::TextWrapped("Sprite-предпросмотр без игровых шейдеров мягких частиц и искажения.");
+    ImGui::TextWrapped("Статичный кадр из игровой библиотеки. «Показывать» меняет только предпросмотр; «В игре» меняет LTX после сохранения.");
+    ImGui::SetNextItemWidth(-1);
+    if(ImGui::SliderFloat("##EffectTime",&s.effectTime,.033f,4.f,"Кадр: %.3f с"))action(WeaponAction::EffectVisibility,-1);
+    for(size_t i=0;i<s.effects.size();++i){auto& e=s.effects[i];ImGui::PushID(int(i));
+        if(ImGui::CollapsingHeader(e.label.c_str(),ImGuiTreeNodeFlags_DefaultOpen)){
+            ImGui::TextWrapped("%s = %s",e.key.c_str(),e.enabled?e.name.c_str():"(выключен)");
+            ImGui::TextDisabled("Точка: %s",e.point.c_str());
+            if(ImGui::Checkbox("В игре (LTX)",&e.enabled))action(WeaponAction::EffectEnabled,int(i));
+            if(ImGui::Checkbox("Показывать в сцене",&e.visible))action(WeaponAction::EffectVisibility,int(i));
+            if(fullButton("Выбрать и посмотреть…"))action(WeaponAction::OpenEffectPicker,int(i));
+        }ImGui::PopID();
     }
+    ImGui::TextWrapped("Точки fire_point, fire_point2 и shell_point — в группе «Точки эффектов» параметров World или HUD. Дым и пламя используют одну точку. Глушитель показан отдельно от обычного пламени.");
+    if(!s.effectStatus.empty())ImGui::TextWrapped("%s",s.effectStatus.c_str());
+}
+void effectPicker(WeaponUIState& s,const WeaponUICallback& action) {
+    if(!s.effectPickerOpen)return;
+    const auto& io=ImGui::GetIO();
+    ImGui::SetNextWindowSize(ImVec2(std::min(850.f*s.uiScale,io.DisplaySize.x-24),std::min(650.f*s.uiScale,io.DisplaySize.y-24)),ImGuiCond_Appearing);
+    ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x*.5f,io.DisplaySize.y*.5f),ImGuiCond_Appearing,ImVec2(.5f,.5f));
+    if(ImGui::Begin("Выбор эффекта",&s.effectPickerOpen,ImGuiWindowFlags_NoSavedSettings)){
+        ImGui::TextWrapped("Подключение изменит параметр только после нажатия кнопки ниже; запись файла — общей кнопкой «Сохранить».");
+        ImGui::SetNextItemWidth(-1);textInput("##EffectSearch",s.effectSearch);
+        const float width=ImGui::GetContentRegionAvail().x;
+        ImGui::BeginChild("EffectList",ImVec2(width*.45f,std::max(100.f,ImGui::GetContentRegionAvail().y-90*s.uiScale)),ImGuiChildFlags_Borders);
+        for(size_t i=0;i<s.effectNames.size();++i)if(contains(s.effectNames[i],s.effectSearch)){
+            if(ImGui::Selectable(s.effectNames[i].c_str(),s.effectNames[i]==s.effectCandidate))action(WeaponAction::PreviewEffect,int(i));}
+        ImGui::EndChild();ImGui::SameLine();ImGui::BeginGroup();
+        const float preview=std::max(64.f,std::min(width*.50f,320*s.uiScale));
+        if(s.effectPreviewTexture)ImGui::Image(s.effectPreviewTexture,ImVec2(preview,preview));
+        ImGui::PushTextWrapPos(ImGui::GetCursorPosX()+preview);ImGui::TextUnformatted(s.effectCandidate.c_str());
+        ImGui::TextUnformatted(s.effectStatus.c_str());ImGui::PopTextWrapPos();ImGui::EndGroup();
+        ImGui::BeginDisabled(s.effectCandidate.empty()||s.effectSlot<0);
+        if(fullButton("Подключить выбранный эффект"))action(WeaponAction::ConnectEffect,0);ImGui::EndDisabled();
+        if(fullButton("Закрыть"))s.effectPickerOpen=false;
+    }ImGui::End();
 }
 void textPane(WeaponUIState& s,const WeaponUICallback& action) {
     ImGui::TextWrapped("Тексты записываются по ID в выбранную XML-таблицу. Один ID может использоваться несколькими секциями.");
@@ -266,12 +323,31 @@ void scenePane(WeaponUIState& s,const WeaponUICallback& action) {
     }
     ImGui::SeparatorText("Вид");
     if(ImGui::Checkbox("Каркас",&s.wireframe))action(WeaponAction::Wireframe,0);
+    ImGui::BeginDisabled(s.view==WeaponView::Hud);
     if(fullButton("Вписать модель"))action(WeaponAction::Frame,0);
     if(fullButton("Сбросить вид"))action(WeaponAction::ResetView,0);
+    ImGui::EndDisabled();
     ImGui::TextWrapped("%s",s.modelName.c_str());
 }
 void modelViewport(WeaponUIState& s,const WeaponUICallback& action) {
     const ImVec2 start=ImGui::GetCursorScreenPos();
+    if(s.view==WeaponView::Hud){
+        ImGui::TextWrapped("HUD · камера от первого лица");bool changed=ImGui::Checkbox("Прицеливание",&s.hudAiming);
+        ImGui::SetNextItemWidth(90*s.uiScale);changed|=ImGui::InputFloat("FOV камеры",&s.cameraFov,0,0,"%.2f");
+        ImGui::SetNextItemWidth(90*s.uiScale);changed|=ImGui::InputFloat("hud_fov ×",&s.hudFovFactor,0,0,"%.3f");
+        tip("Настройки предпросмотра. Итоговый вертикальный FOV = FOV камеры × hud_fov; значения из user.ltx задайте вручную. В оружейный LTX не записываются.");
+        ImGui::SetNextItemWidth(-1);if(ImGui::BeginCombo("##HudMotion",s.hudMotionIndex>=0&&size_t(s.hudMotionIndex)<s.hudMotions.size()?s.hudMotions[size_t(s.hudMotionIndex)].c_str():"Bind pose")){
+            if(ImGui::Selectable("Bind pose",s.hudMotionIndex<0)){s.hudMotionIndex=-1;changed=true;}
+            for(size_t i=0;i<s.hudMotions.size();++i)if(ImGui::Selectable(s.hudMotions[i].c_str(),int(i)==s.hudMotionIndex)){s.hudMotionIndex=int(i);changed=true;}ImGui::EndCombo();}
+        ImGui::SetNextItemWidth(-1);changed|=ImGui::SliderFloat("##HudTime",&s.hudMotionTime,0,5,"Поза: %.3f с");
+        ImGui::SetNextItemWidth(90*s.uiScale);
+        if(ImGui::BeginCombo("Кадр",s.hudAspect==0?"По окну":s.hudAspect<1.5f?"4:3":"16:9")){
+            if(ImGui::Selectable("16:9",s.hudAspect>1.5f))s.hudAspect=16.f/9.f;
+            if(ImGui::Selectable("4:3",s.hudAspect>0&&s.hudAspect<1.5f))s.hudAspect=4.f/3.f;
+            if(ImGui::Selectable("По окну",s.hudAspect==0))s.hudAspect=0;ImGui::EndCombo();}
+        changed|=ImGui::Checkbox("Точки эффектов",&s.showEmitters);
+        if(changed)action(WeaponAction::HudPreviewSettings,0);
+    }else {
     const char* names[]={"FLY","ORB","PAN","LIGHT","MODEL"};
     const char* tips[]={"Свободная камера: ПКМ — обзор, WASD/QE — движение, Shift — быстрее","Орбита: ЛКМ или ПКМ — вращение камеры","Сдвиг камеры: ЛКМ — перетаскивание; средняя кнопка — сдвиг в любом режиме","Свет: ЛКМ — направление; ПКМ — камера","Модель: ЛКМ — вращение; ПКМ — камера"};
     for(int i=0;i<5;++i){if(i)ImGui::SameLine();const bool active=int(s.mode)==i;if(active)ImGui::PushStyleColor(ImGuiCol_Button,ImVec4(.20f,.42f,.57f,1));
@@ -279,12 +355,18 @@ void modelViewport(WeaponUIState& s,const WeaponUICallback& action) {
     const char* axes[]={"+X","+Y","+Z","-X","-Y","-Z"};
     for(int i=0;i<6;++i){if(i)ImGui::SameLine();if(ImGui::Button(axes[i]))action(WeaponAction::AxisView,i);}
     ImGui::SameLine();if(ImGui::Button("Вписать"))action(WeaponAction::Frame,0);
+    }
     s.toolbarRect={start.x,start.y,ImGui::GetContentRegionAvail().x,ImGui::GetCursorScreenPos().y-start.y};
-    const ImVec2 p=ImGui::GetCursorScreenPos();ImVec2 size=ImGui::GetContentRegionAvail();size.x=std::max(1.f,size.x);size.y=std::max(1.f,size.y);
+    ImVec2 p=ImGui::GetCursorScreenPos();ImVec2 size=ImGui::GetContentRegionAvail();size.x=std::max(1.f,size.x);size.y=std::max(1.f,size.y);
+    if(s.view==WeaponView::Hud&&s.hudAspect>0){const auto available=size;if(size.x/size.y>s.hudAspect)size.x=size.y*s.hudAspect;else size.y=size.x/s.hudAspect;p.x+=(available.x-size.x)*.5f;p.y+=(available.y-size.y)*.5f;ImGui::SetCursorScreenPos(p);}
     ImGui::InvisibleButton("WeaponViewport",size,ImGuiButtonFlags_MouseButtonLeft|ImGuiButtonFlags_MouseButtonRight|ImGuiButtonFlags_MouseButtonMiddle);
     s.viewportRect={p.x,p.y,size.x,size.y};s.viewportHovered=ImGui::IsItemHovered();s.viewportClicked=ImGui::IsItemClicked();s.viewportActive=ImGui::IsItemActive();
     auto* draw=ImGui::GetWindowDrawList();
     if(s.viewportTexture)draw->AddImage(s.viewportTexture,p,ImVec2(p.x+size.x,p.y+size.y));else draw->AddRectFilled(p,ImVec2(p.x+size.x,p.y+size.y),IM_COL32(24,27,31,255));
+    draw->PushClipRect(p,ImVec2(p.x+size.x,p.y+size.y),true);
+    if(s.view==WeaponView::Hud){auto c=ImVec2(p.x+size.x*.5f,p.y+size.y*.5f);draw->AddLine(ImVec2(c.x-6,c.y),ImVec2(c.x+6,c.y),IM_COL32(210,210,210,160));draw->AddLine(ImVec2(c.x,c.y-6),ImVec2(c.x,c.y+6),IM_COL32(210,210,210,160));}
+    if(s.showEmitters)for(const auto& m:s.markers)if(m.visible){ImVec2 q(p.x+m.x*size.x,p.y+m.y*size.y);draw->AddCircle(q,5,IM_COL32(255,180,50,255),12,2);draw->AddText(ImVec2(q.x+8,q.y),IM_COL32(255,210,120,255),m.label.c_str());}
+    draw->PopClipRect();
     if(!s.hasModel)draw->AddText(ImVec2(p.x+16,p.y+16),IM_COL32(180,188,198,255),s.catalog==WeaponCatalog::Ammunition?"Выберите патроны из списка":"Выберите оружие из списка");
 }
 std::string fireModeName(int mode){return mode<0?"Автоматический":mode==1?"Одиночный":"Очередь "+std::to_string(mode);}
@@ -372,19 +454,22 @@ void simulationViewport(WeaponUIState& s,const WeaponUICallback& action) {
 void viewport(WeaponUIState& s,const WeaponUICallback& action) {
     s.viewportHovered=s.viewportActive=s.viewportClicked=false;
     const bool canSimulate=s.catalog==WeaponCatalog::Weapons&&s.simulationAvailable;
-    const char* names[]={"Модель","Разброс","Траектория"};
-    for(int i=0;i<3;++i){if(i)ImGui::SameLine();ImGui::BeginDisabled(i!=0&&!canSimulate);
-        if(ImGui::Button(names[i])){s.view=WeaponView(i);action(WeaponAction::SimulationView,i);}ImGui::EndDisabled();}
-    if(!canSimulate)s.view=WeaponView::Model;
-    if(s.view==WeaponView::Model)modelViewport(s,action);else simulationViewport(s,action);
+    const char* names[]={"World","HUD","Разброс","Траектория"};const WeaponView views[]={WeaponView::Model,WeaponView::Hud,WeaponView::Spread,WeaponView::Trajectory};
+    const float rightEdge=ImGui::GetCursorScreenPos().x+ImGui::GetContentRegionAvail().x;
+    for(int i=0;i<4;++i){if(i&&ImGui::GetItemRectMax().x+ImGui::CalcTextSize(names[i]).x+ImGui::GetStyle().FramePadding.x*2+ImGui::GetStyle().ItemSpacing.x<=rightEdge)ImGui::SameLine();ImGui::BeginDisabled(i==1?(!s.hudAvailable||s.catalog!=WeaponCatalog::Weapons):(i>=2&&!canSimulate));
+        const bool selected=s.view==views[i];if(selected)ImGui::PushStyleColor(ImGuiCol_Button,ImVec4(.20f,.42f,.57f,1));
+        if(ImGui::Button(names[i])){if(i<2)action(WeaponAction::SelectModelView,int(views[i]));else {s.view=views[i];action(WeaponAction::SimulationView,int(views[i]));}}
+        if(selected)ImGui::PopStyleColor();ImGui::EndDisabled();}
+    if(!canSimulate&&(s.view==WeaponView::Spread||s.view==WeaponView::Trajectory))s.view=WeaponView::Model;
+    if(s.view==WeaponView::Model||s.view==WeaponView::Hud)modelViewport(s,action);else simulationViewport(s,action);
 }
 void setup(WeaponUIState& s,const WeaponUICallback& action) {
     if(s.setupOpen&&!ImGui::IsPopupOpen("Источники WeaponLab"))ImGui::OpenPopup("Источники WeaponLab");
     const auto& io=ImGui::GetIO();ImGui::SetNextWindowSize(ImVec2(std::min(760.f*s.uiScale,io.DisplaySize.x-24),std::min(620.f*s.uiScale,io.DisplaySize.y-24)),ImGuiCond_Appearing);
     if(ImGui::BeginPopupModal("Источники WeaponLab",&s.setupOpen,ImGuiWindowFlags_NoSavedSettings)){
         ImGui::TextWrapped("Выберите gamedata. Можно использовать стандартные файлы ТЧ 1.0006 или назначить свои пути ниже. Источники доступны для переназначения в любой момент.");
-        const char* labels[]={"gamedata","Конфиги оружия и патронов","Названия и описания (XML)","Атлас иконок (DDS)","World-модели (meshes)","Текстуры (textures)"};
-        for(int i=0;i<6;++i){ImGui::PushID(i);ImGui::TextUnformatted(labels[i]);ImGui::SetNextItemWidth(std::max(80.f,ImGui::GetContentRegionAvail().x-46*s.uiScale));textInput("##Path",s.paths.values[size_t(i)]);ImGui::SameLine();if(ImGui::Button("…"))action(WeaponAction::BrowsePath,i);ImGui::PopID();
+        const char* labels[]={"gamedata","Конфиги оружия и патронов","Названия и описания (XML)","Атлас иконок (DDS)","Модели World и HUD (meshes)","Текстуры (textures)","Библиотека эффектов (particles.xr)"};
+        for(int i=0;i<7;++i){ImGui::PushID(i);ImGui::TextUnformatted(labels[i]);ImGui::SetNextItemWidth(std::max(80.f,ImGui::GetContentRegionAvail().x-46*s.uiScale));textInput("##Path",s.paths.values[size_t(i)]);ImGui::SameLine();if(ImGui::Button("…"))action(WeaponAction::BrowsePath,i);ImGui::PopID();
             if(i==0&&fullButton("Использовать стандартные файлы этой gamedata"))action(WeaponAction::DefaultPaths,0);}
         ImGui::Spacing();
         if(fullButton("Применить пути и прочитать конфиги"))action(WeaponAction::ApplyPaths,0);
@@ -509,10 +594,10 @@ void DrawWeaponUI(WeaponUIState& s,const WeaponUICallback& action) {
     ImGui::SameLine();
     if(ImGui::Button("Обновить список"))action(WeaponAction::ReloadCatalog,0);
     ImGui::SameLine();
-    const bool pending=std::any_of(s.parameters.begin(),s.parameters.end(),[](const WeaponParameter& p){return p.pending;});
+    const bool pending=std::any_of(s.parameters.begin(),s.parameters.end(),[](const WeaponParameter& p){return p.pending;})||std::any_of(s.hudParameters.begin(),s.hudParameters.end(),[](const WeaponParameter& p){return p.pending;});
     ImGui::BeginDisabled(!(s.dataDirty||s.atlasDirty||pending));if(ImGui::Button("Сохранить  Ctrl+S"))action(WeaponAction::SaveData,0);ImGui::EndDisabled();
     ImGui::SameLine();ImGui::BeginDisabled(!(s.dataDirty||pending));if(ImGui::Button("Отменить правки"))action(WeaponAction::DiscardData,0);ImGui::EndDisabled();
-    ImGui::SameLine();ImGui::TextDisabled("%s",s.dataDirty||s.atlasDirty||pending?"Есть правки":"WeaponLab 0.3.0");
+    ImGui::SameLine();ImGui::TextDisabled("%s",s.dataDirty||s.atlasDirty||pending?"Есть правки":"WeaponLab 0.4.0");
     const float width=ImGui::GetContentRegionAvail().x,spacing=ImGui::GetStyle().ItemSpacing.x;
     const auto& style=ImGui::GetStyle();
     const float catalogMinimum=std::max(175.f,ImGui::CalcTextSize("Оружие").x+ImGui::CalcTextSize("Патроны").x+
@@ -525,10 +610,10 @@ void DrawWeaponUI(WeaponUIState& s,const WeaponUICallback& action) {
     p=ImGui::GetCursorScreenPos();s.inspectorRect={p.x,p.y,right,height};
     ImGui::BeginChild("InspectorPane",ImVec2(right,height),ImGuiChildFlags_Borders,ImGuiWindowFlags_NoScrollWithMouse);++s.renderedPaneCount;
     if(ImGui::BeginTabBar("WeaponInspector",ImGuiTabBarFlags_FittingPolicyResizeDown)){
-        const char* tabs[]={"Параметры","Тексты","Сцена"};const auto requested=s.tab;
-        for(int i=0;i<3;++i)if(ImGui::BeginTabItem(tabs[i],nullptr,s.forceTab&&int(requested)==i?ImGuiTabItemFlags_SetSelected:0)){
+        const char* tabs[]={"Параметры","Тексты","Сцена","Эффекты"};const auto requested=s.tab;
+        for(int i=0;i<4;++i)if(ImGui::BeginTabItem(tabs[i],nullptr,s.forceTab&&int(requested)==i?ImGuiTabItemFlags_SetSelected:0)){
             s.tab=WeaponTab(i);ImGui::BeginChild("InspectorScroll",ImVec2(0,0),0,ImGuiWindowFlags_NoScrollWithMouse);
-            ImGui::BeginDisabled(i!=2&&s.selected<0);if(i==0)parameterPane(s,action);if(i==1)textPane(s,action);if(i==2)scenePane(s,action);ImGui::EndDisabled();
+            ImGui::BeginDisabled(i!=2&&s.selected<0);if(i==0)parameterPane(s,action);if(i==1)textPane(s,action);if(i==2)scenePane(s,action);if(i==3)effectPane(s,action);ImGui::EndDisabled();
             // Scroll only after controls have had a chance to own this frame's wheel.
             // ImGui's default scroll runs in NewFrame and races a first wheel tick over a slider.
             if(ImGui::IsWindowHovered()&&!s.inspectorWheelUsed&&io.MouseWheel!=0)
@@ -539,6 +624,6 @@ void DrawWeaponUI(WeaponUIState& s,const WeaponUICallback& action) {
     s.forceTab=false;ImGui::EndChild();ImGui::TextWrapped("%s",s.status.c_str());
     if(!s.warning.empty())ImGui::TextColored(ImVec4(1,.7f,.35f,1),"%s",s.warning.c_str());
     ImGui::End();
-    setup(s,action);iconEditor(s,action);
+    setup(s,action);iconEditor(s,action);effectPicker(s,action);
 }
 } // namespace lab

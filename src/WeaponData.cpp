@@ -166,6 +166,10 @@ bool WeaponDatabase::sectionValues(const std::string& section,WeaponConfigValues
  for(const auto& entry:found->second)values.emplace(entry.first,entry.second.value);
  return true;
 }
+bool WeaponDatabase::sectionParameters(const std::string& section,std::vector<WeaponValue>& values,std::string& error)const {
+ values.clear();WeaponConfigValues checked;if(!sectionValues(section,checked,error))return false;
+ for(const auto& pair:impl_->resolvedSections.at(section)){auto value=pair.second;value.inherited=value.sourceSection!=section;values.push_back(std::move(value));}return true;
+}
 std::vector<WeaponAmmoRecord> WeaponDatabase::ammunitionForWeapon(const std::string& section)const {
  WeaponConfigValues gun;std::string error;std::vector<WeaponAmmoRecord> result;
  if(!sectionValues(section,gun,error))return result;

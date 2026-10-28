@@ -480,12 +480,12 @@ void Renderer::drawScene(bool clean,bool transparentBackground){
  const float back[4]={transparentBackground?0.f:background_[0],transparentBackground?0.f:background_[1],transparentBackground?0.f:background_[2],transparentBackground?0.f:1.f};
  context_->ClearRenderTargetView(rtv_.Get(),back);context_->ClearDepthStencilView(dsv_.Get(),D3D11_CLEAR_DEPTH,1.f,0);
  ID3D11RenderTargetView* target=rtv_.Get();context_->OMSetRenderTargets(1,&target,dsv_.Get());
- const D3D11_VIEWPORT viewport={0,0,float(width_),float(height_),0,1};context_->RSSetViewports(1,&viewport);
- const V3 cameraEye=camera_.eye(),up=camera_.up();
+ const D3D11_VIEWPORT viewport={0,0,float(width_),float(height_),0,hudView_?.02f:1.f};context_->RSSetViewports(1,&viewport);
+ const V3 cameraEye=hudView_?V3{}:camera_.eye(),up=hudView_?V3{0,1,0}:camera_.up();
  const XMVECTOR eye=XMVectorSet(cameraEye.x,cameraEye.y,cameraEye.z,1);
- const XMMATRIX view=XMMatrixLookAtLH(eye,XMVectorSet(camera_.pivot.x,camera_.pivot.y,camera_.pivot.z,1),XMVectorSet(up.x,up.y,up.z,0));
- const XMMATRIX projection=XMMatrixPerspectiveFovLH(XM_PIDIV4,float(width_)/float(height_),.005f,100.f);
- const XMMATRIX world=XMMatrixRotationX(modelPitch_)*XMMatrixRotationY(modelYaw_);
+ const XMMATRIX view=hudView_?XMMatrixIdentity():XMMatrixLookAtLH(eye,XMVectorSet(camera_.pivot.x,camera_.pivot.y,camera_.pivot.z,1),XMVectorSet(up.x,up.y,up.z,0));
+ const XMMATRIX projection=XMMatrixPerspectiveFovLH(hudView_?XMConvertToRadians(hudFov_):XM_PIDIV4,float(width_)/float(height_),hudView_?.2f:.005f,100.f);
+ const XMMATRIX world=hudView_?XMMatrixScaling(1/modelScale_,1/modelScale_,1/modelScale_)*XMMatrixTranslation(modelCenter_.x,modelCenter_.y,modelCenter_.z)*rawModelWorld():XMMatrixRotationX(modelPitch_)*XMMatrixRotationY(modelYaw_);
  CB cb{};cb.eye={cameraEye.x,cameraEye.y,cameraEye.z,1};
  cb.ld={cosf(lightPitch_)*sinf(lightYaw_),sinf(lightPitch_),cosf(lightPitch_)*cosf(lightYaw_),0};
  cb.lc={light_[0]*lightIntensity_,light_[1]*lightIntensity_,light_[2]*lightIntensity_,1};
@@ -564,6 +564,7 @@ void Renderer::drawScene(bool clean,bool transparentBackground){
  };
  if(!clean&&skeletonOn_)lines(skeletonVB_.Get(),skeletonVertexCount_);
  if(!clean)lines(brushVB_.Get(),brushVertexCount_);
+ if(!clean)drawParticles(view,projection,cameraEye,up);
  context_->OMSetRenderTargets(0,nullptr,nullptr);
 }
 void Renderer::Draw(bool present){

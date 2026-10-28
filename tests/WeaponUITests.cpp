@@ -196,6 +196,32 @@ void ammunitionCatalog(){Context ctx;auto s=fixture();auto& io=ImGui::GetIO();
     click(hover(icons,icons->GetID("Выбрать иконку для патронов")));
     require(std::find(actions.begin(),actions.end(),std::make_pair(lab::WeaponAction::ApplyIconRect,0))!=actions.end(),"ammo icon rectangle uses same apply workflow");
 }
+void hudAndGroups(){
+    Context ctx;auto s=fixture();s.hudAvailable=true;s.hudSection="wpn_ak74_hud";
+    auto pose=lab::MakeWeaponParameter("position","0, 0, 0");pose.step=.001;pose.minimum=-1;pose.maximum=1;pose.integer=false;s.hudParameters={pose};
+    auto& io=ImGui::GetIO();std::vector<std::pair<lab::WeaponAction,int>> actions;
+    auto step=[&]{frame(s,1490,900,[&](lab::WeaponAction a,int i){actions.emplace_back(a,i);});};
+    for(int i=0;i<4;++i)step();
+    auto hover=[&](ImGuiWindow* w,ImGuiID id){require(w!=nullptr,"HUD target window exists");for(float y=w->Pos.y+5;y<w->Pos.y+w->Size.y-5;y+=3)for(float x=w->Pos.x+8;x<w->Pos.x+w->Size.x-8;x+=12){io.AddMousePosEvent(x,y);step();if(GImGui->HoveredId==id)return ImVec2(x,y);}throw std::runtime_error("HUD/group control not found");};
+    auto click=[&](ImVec2 p){io.AddMousePosEvent(p.x,p.y);step();io.AddMouseButtonEvent(0,true);step();io.AddMouseButtonEvent(0,false);step();};
+    auto* inspector=findWindow("InspectorScroll");auto group=inspector->GetID("###Group0Item");
+    click(hover(inspector,group));require(inspector->StateStorage.GetInt(group,1)==0,"damage group collapses");
+    click(hover(inspector,group));require(inspector->StateStorage.GetInt(group,0)==1,"damage group expands");
+    auto* viewport=findWindow("ViewportPane");actions.clear();click(hover(viewport,viewport->GetID("HUD")));
+    require(std::find(actions.begin(),actions.end(),std::make_pair(lab::WeaponAction::SelectModelView,int(lab::WeaponView::Hud)))!=actions.end(),"HUD requests shell switch");
+    require(s.view==lab::WeaponView::Model,"UI waits for shell acceptance of model switch");
+    s.view=lab::WeaponView::Hud;for(int i=0;i<3;++i)step();inspector=findWindow("InspectorScroll");int zero=0;auto row=inspector->GetID(zero);auto component=ImHashData(&zero,sizeof(zero),row);auto slider=ImHashStr("##StepSlider",0,component);
+    hover(inspector,slider);actions.clear();io.AddMouseWheelEvent(0,1);step();step();require(std::abs(s.hudParameters[0].numbers[0]-.001)<1e-8,"HUD position increments millimetre step");
+    require(std::find(actions.begin(),actions.end(),std::make_pair(lab::WeaponAction::ChangeHudParameter,0))!=actions.end(),"HUD dispatch is separate from world");
+    require(s.parameters[0].value=="0.4"&&s.view==lab::WeaponView::Hud,"HUD edit preserves world parameter and first person view");
+    s.effects={{"flame_particles","Пламя","fire_point","weapons\\test","weapons\\test",true,false}};
+    s.tab=lab::WeaponTab::Effects;s.forceTab=true;step();step();inspector=findWindow("InspectorScroll");row=inspector->GetID(zero);actions.clear();click(hover(inspector,ImHashStr("Показывать в сцене",0,row)));
+    require(s.effects[0].visible&&s.effects[0].enabled,"preview visibility does not disable game effect");
+    require(std::find(actions.begin(),actions.end(),std::make_pair(lab::WeaponAction::EffectVisibility,0))!=actions.end(),"preview visibility action");
+    s.effectNames={"weapons\\test","weapons\\second"};s.effectSlot=0;s.effectPickerOpen=true;step();step();step();auto* list=findWindow("EffectList");actions.clear();click(hover(list,list->GetID(s.effectNames[1].c_str())));
+    require(std::find(actions.begin(),actions.end(),std::make_pair(lab::WeaponAction::PreviewEffect,1))!=actions.end(),"picker requests candidate preview only");
+    require(s.effects[0].name=="weapons\\test","browsing candidates leaves configured effect unchanged");
+}
 void snapshot(const std::string& path,int width,int height) {
     unsigned char* atlas=nullptr;int aw=0,ah=0;ImGui::GetIO().Fonts->GetTexDataAsRGBA32(&atlas,&aw,&ah);
     std::vector<unsigned char> rgb(size_t(width)*height*3,15);
@@ -255,7 +281,13 @@ int main(int argc,char** argv){try{
         if(argc>5&&std::string(argv[5])=="spread"){s.simulationAvailable=true;s.view=lab::WeaponView::Spread;s.ammunition={{"ammo_545","5.45 обычный"}};s.simulation.supported=s.simulation.spreadValid=true;s.simulation.magazineSize=30;s.simulation.roundsFired=30;s.simulation.rpm=600;s.simulation.maxConeRadius=.25;s.simulation.fireModes={1,3,-1};for(int i=0;i<30;++i)s.simulation.spread.push_back({.2*std::sin(i*3.2),.2*std::cos(i*1.6),i*.1,1,i,0});}
         if(argc>5&&std::string(argv[5])=="trajectory"){s.simulationAvailable=true;s.view=lab::WeaponView::Trajectory;s.ammunition={{"ammo_545","5.45 обычный"}};s.simulation.supported=s.simulation.trajectoryValid=true;s.simulation.fireModes={1,3,-1};s.simulation.magazineSize=30;s.simulation.rpm=600;for(int i=0;i<=200;i+=5)s.simulation.trajectory.push_back({double(i),-.00003*i*i,i/800.,800.});}
         if(argc>5&&std::string(argv[5])=="scene"){s.tab=lab::WeaponTab::Scene;s.forceTab=true;s.meshes={{"Основная модель",true},{"Дополнительный меш",false}};}
+        if(argc>5&&(std::string(argv[5])=="hud"||std::string(argv[5])=="effects"||std::string(argv[5])=="effect-picker")){
+            s.hudAvailable=true;s.view=lab::WeaponView::Hud;s.hudSection="wpn_ak74_hud";s.hudMotions={"idle","idle_aim","reload"};s.hudMotionIndex=0;
+            for(const auto& key: {"position","orientation","fire_point","shell_point"})s.hudParameters.push_back(lab::MakeWeaponParameter(key,"0.01, -0.02, 0.03","w_ak74.ltx [wpn_ak74_hud]"));
+            s.hudWarning="Секция HUD может использоваться несколькими оружиями.";s.markers={{"fire_point",.6f,.4f,true}};
+            if(std::string(argv[5])!="hud"){s.tab=lab::WeaponTab::Effects;s.forceTab=true;s.particleLibraryStatus="particles.xr: 240 эффектов и групп.";s.effects={{"flame_particles","Пламя","fire_point","weapons\\generic_weapon01","",true,true},{"smoke_particles","Дым","fire_point","weapons\\generic_shoot_00","",true,false}};}
+            if(std::string(argv[5])=="effect-picker"){s.effectPickerOpen=true;s.effectSlot=0;s.effectNames={"weapons\\generic_weapon01","weapons\\generic_shoot_00","weapons\\shells_545x39"};s.effectCandidate=s.effectNames[0];s.effectStatus="Статичный кадр. Подключение — отдельной кнопкой.";}}
         for(int i=0;i<5;++i)frame(s,w,h);
         snapshot(argv[2],w,h);return 0;
     }
-    numeric();geometry();controls();atlas();description();meshVisibility();simulation();ammunitionCatalog();std::cout<<"PASS: WeaponUI bidirectional wheel, wrapped UTF8 editing, arbitrary atlas, mesh visibility, simulation panes, ammunition catalog\n";return 0;}catch(const std::exception& e){std::cerr<<"FAIL: "<<e.what()<<'\n';return 1;}}
+    numeric();geometry();controls();atlas();description();meshVisibility();simulation();ammunitionCatalog();hudAndGroups();std::cout<<"PASS: WeaponUI bidirectional wheel, wrapped UTF8 editing, arbitrary atlas, mesh visibility, simulation panes, ammunition catalog\n";return 0;}catch(const std::exception& e){std::cerr<<"FAIL: "<<e.what()<<'\n';return 1;}}

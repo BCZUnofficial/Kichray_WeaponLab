@@ -1,6 +1,7 @@
 #pragma once
 #include "imgui.h"
 #include "WeaponSimulation.h"
+#include "WeaponHUD.h"
 #include <array>
 #include <functional>
 #include <string>
@@ -9,20 +10,21 @@
 namespace lab {
 enum class WeaponMode { Fly, Orbit, Pan, Light, Model };
 enum class WeaponCatalog { Weapons, Ammunition };
-enum class WeaponTab { Parameters, Texts, Scene };
-enum class WeaponView { Model, Spread, Trajectory };
+enum class WeaponTab { Parameters, Texts, Scene, Effects };
+enum class WeaponView { Model, Spread, Trajectory, Hud };
 enum class WeaponAction {
     SelectWeapon, SelectCatalog, SaveData, DiscardData, ReloadCatalog,
     DefaultPaths, BrowsePath, ApplyPaths,
     ChangeParameter, ChangeTexts, SetMode, Frame, ResetView, AxisView,
     LightSettings, BackgroundSettings, Wireframe,
     ApplyIconRect, CaptureIcon, PreviewSnapshot, StageIcon, SaveAtlas, DiscardAtlas, ExportSnapshot,
-    SimulationSettings, FocusParameter, SimulationView, PartVisibility, ShowAllParts
+    SimulationSettings, FocusParameter, SimulationView, PartVisibility, ShowAllParts, SelectModelView, ChangeHudParameter, HudPreviewSettings,
+    EffectVisibility, EffectEnabled, OpenEffectPicker, PreviewEffect, ConnectEffect, ReloadEffects
 };
 // Path indices: gamedata, config/weapons, string table XML, icon atlas DDS,
 // meshes root, textures root. Paths are UTF-8; shell converts to native paths.
 struct WeaponPathState {
-    std::array<std::string,6> values;
+    std::array<std::string,7> values;
 };
 struct WeaponRow { std::string section,label,source; bool missingModel=false; };
 struct WeaponParameter {
@@ -36,6 +38,8 @@ struct WeaponParameter {
 };
 struct WeaponRect {float x=0,y=0,w=0,h=0;};
 struct WeaponMeshRow {std::string label;bool visible=true;};
+struct WeaponEffectRow {std::string key,label,point,name,remembered;bool enabled=false,visible=false;};
+struct WeaponMarker {std::string label;float x=0,y=0;bool visible=false;};
 struct WeaponAmmoRow {std::string section,label;};
 struct WrappedTextEditState {
     size_t cursor=0,anchor=0;
@@ -57,7 +61,21 @@ struct WeaponUIState {
     bool forceCatalogTab=false;
     std::vector<WeaponRow> weapons;
     int selected=-1;
-    std::vector<WeaponParameter> parameters;
+    std::vector<WeaponParameter> parameters,hudParameters;
+    std::string hudSection,hudWarning,hudMotion;
+    bool hudAvailable=false,hudAiming=false,showEmitters=true;
+    float cameraFov=67.5f,hudFovFactor=.45f,hudAspect=16.f/9.f;
+    std::vector<std::string> hudMotions;
+    int hudMotionIndex=-1;
+    float hudMotionTime=0;
+    std::vector<WeaponMarker> markers;
+    std::vector<WeaponEffectRow> effects;
+    std::vector<std::string> effectNames;
+    std::string effectSearch,effectCandidate,effectStatus,particleLibraryStatus;
+    bool effectPickerOpen=false;
+    int effectSlot=-1;
+    float effectTime=.165f;
+    ImTextureID effectPreviewTexture=0;
     std::vector<WeaponMeshRow> meshes;
     std::vector<WeaponAmmoRow> ammunition;
     WeaponView view=WeaponView::Model;

@@ -19,6 +19,8 @@
 #include "ViewportTools.h"
 #include "MaterialAlpha.h"
 #include "AttachmentPreview.h"
+#include "WeaponHUD.h"
+#include "ParticleLibrary.h"
 namespace lab {
 class Renderer {
   using Dev=Microsoft::WRL::ComPtr<ID3D11Device>;
@@ -82,6 +84,19 @@ class Renderer {
   ViewportCamera camera_;
   float lightYaw_=0.9f,lightPitch_=0.65f;
   float modelYaw_=0.f,modelPitch_=0.f;
+  bool hudView_=false;
+  HudMatrix hudTransform_=HudIdentity();
+  float hudFov_=30.375f,sceneCameraFov_=67.5f;
+  struct ParticleBatch {ParticleLayer layer;HudMatrix transform;Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> texture;};
+  std::vector<ParticleBatch> particleBatches_;
+  Microsoft::WRL::ComPtr<ID3D11VertexShader> particleVS_;
+  Microsoft::WRL::ComPtr<ID3D11PixelShader> particlePS_;
+  Microsoft::WRL::ComPtr<ID3D11InputLayout> particleInput_;
+  Microsoft::WRL::ComPtr<ID3D11Buffer> particleVB_,particleCB_;
+  Microsoft::WRL::ComPtr<ID3D11BlendState> particleAddBlend_;
+  bool initParticles(std::wstring& error);
+  void drawParticles(const DirectX::XMMATRIX& view,const DirectX::XMMATRIX& projection,V3 eye,V3 up);
+  DirectX::XMMATRIX rawModelWorld()const;
   float normalStrength_=1.f,glossStrength_=0.5f;
   float lightIntensity_=1.f;
   V3 environment_{};
@@ -117,6 +132,12 @@ public:
   UINT SceneWidth()const{return width_;}
   UINT SceneHeight()const{return height_;}
   void DrawScene();
+  void SetHudView(bool enabled,const HudMatrix& transform=HudIdentity(),float fovDegrees=30.375f,float cameraFov=67.5f){hudView_=enabled;hudTransform_=transform;hudFov_=std::clamp(fovDegrees,.5f,179.f);sceneCameraFov_=std::clamp(cameraFov,5.f,179.f);}
+  bool HudView()const{return hudView_;}
+  bool BoneTransform(const std::string& name,HudMatrix& transform)const;
+  bool ProjectPoint(V3 rawPoint,float& x,float& y,bool particleProjection=false)const;
+  bool SetParticlePreview(const std::vector<std::pair<ParticleLayer,HudMatrix>>& layers,const std::vector<Image>& textures,std::wstring& error);
+  void ClearParticlePreview(){particleBatches_.clear();}
   void BeginUI();
   HRESULT PresentUI();
   bool SetMesh(Mesh& mesh,std::wstring& error);

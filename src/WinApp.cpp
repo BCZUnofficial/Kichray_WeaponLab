@@ -35,7 +35,7 @@ extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND,UINT,WPARAM,LP
 namespace {
 using Microsoft::WRL::ComPtr;
 namespace fs=std::filesystem;
-constexpr const wchar_t* AppTitle=L"Kichray WeaponLab 0.3.0";
+constexpr const wchar_t* AppTitle=L"Kichray WeaponLab 0.4.0";
 std::string utf8(const std::wstring& text) {
     if(text.empty())return {};
     int size=WideCharToMultiByte(CP_UTF8,0,text.data(),int(text.size()),nullptr,0,nullptr,nullptr);
@@ -179,7 +179,13 @@ class App {
     lab::WeaponUIState ui_;
     lab::WeaponPathState loadedPaths_;
     lab::FlightInput flight_;
-    ComPtr<ID3D11ShaderResourceView> atlasView_,snapshotView_;
+    ComPtr<ID3D11ShaderResourceView> atlasView_,snapshotView_,effectPreviewView_;
+    lab::ParticleLibrary particles_;
+    lab::HudConfiguration hud_;
+    std::map<std::string,lab::Image> particleTextures_;
+    std::map<std::string,std::string> rememberedEffects_;
+    std::map<std::string,std::vector<bool>> meshVisibility_;
+    std::string effectSection_;
     lab::Image snapshot_,fitted_;
     std::string section_,queuedSelection_;
     std::array<std::string,2> catalogSelection_,catalogSearch_,catalogParameterSearch_;
@@ -234,9 +240,9 @@ class App {
         const std::string priorAmmo=lastSimulationAmmo_;
         ui_.ammunition.clear();ui_.simulation={};ui_.simulationAvailable=false;
         if(!current()||ui_.catalog==lab::WeaponCatalog::Ammunition){simulationSection_.clear();ui_.view=lab::WeaponView::Model;return;}
-        if(!data_.sectionValues(section_,weapon,error)){ui_.simulation.error=error;ui_.view=lab::WeaponView::Model;return;}
+        if(!data_.sectionValues(section_,weapon,error)){ui_.simulation.error=error;if(ui_.view!=lab::WeaponView::Hud)ui_.view=lab::WeaponView::Model;return;}
         ui_.simulationAvailable=lab::IsSimulationFirearm(weapon);
-        if(!ui_.simulationAvailable){ui_.view=lab::WeaponView::Model;return;}
+        if(!ui_.simulationAvailable){if(ui_.view!=lab::WeaponView::Hud)ui_.view=lab::WeaponView::Model;return;}
         const auto ammo=data_.ammunitionForWeapon(section_);
         int selected=0;
         for(size_t i=0;i<ammo.size();++i){ui_.ammunition.push_back({ammo[i].section,ammo[i].label+(ammo[i].available?"":" [нет данных]")});if(ammo[i].section==priorAmmo)selected=int(i);}
@@ -254,26 +260,148 @@ class App {
         request.triggerPause=ui_.triggerPause;request.seed=ui_.seed;ui_.simulation=lab::SimulateWeapon(request);ui_.simulation.ammoName=selectedAmmo.label;
         if(!physicsError.empty())ui_.simulation.warnings.push_back(physicsError);
     }
+    void refreshHud(bool rebuild) {
+        lab::WeaponConfigValues values;std::string error;
+        std::string target;
+        if(current()&&ui_.catalog==lab::WeaponCatalog::Weapons&&data_.sectionValues(section_,values,error))target=lab::ConfigString(values,"hud");
+        const bool changed=ui_.hudSection!=target;ui_.hudSection=target;ui_.hudAvailable=!target.empty();
+        if(target.empty()){ui_.hudParameters.clear();ui_.hudWarning.clear();if(ui_.view==lab::WeaponView::Hud)ui_.view=lab::WeaponView::Model;return;}
+        if(rebuild||changed){
+            ui_.hudParameters.clear();std::vector<lab::WeaponValue> parameters;
+            if(!data_.sectionParameters(target,parameters,error)){ui_.hudWarning=error;return;}
+            for(const auto& p:parameters){auto row=lab::MakeWeaponParameter(p.key,p.value,p.sourceFile.u8string()+" ["+p.sourceSection+"]",p.inherited);
+                if(row.numbers.size()==3&&(p.key=="position"||p.key=="orientation"||p.key=="fire_point"||p.key=="fire_point2"||p.key=="shell_point"||p.key=="zoom_offset")){
+                    row.integer=false;row.step=p.key=="orientation"?.1:.001;row.minimum=p.key=="orientation"?-180:-1;row.maximum=-row.minimum;
+                    for(auto n:row.numbers){row.minimum=std::min(row.minimum,n);row.maximum=std::max(row.maximum,n);}}
+                ui_.hudParameters.push_back(std::move(row));}
+            for(const auto* key:{"fire_point2","shell_point"})if(std::none_of(parameters.begin(),parameters.end(),[&](const auto& p){return p.key==key;})){
+                std::string value="0, 0, 0";if(std::string(key)=="fire_point2")for(const auto& p:parameters)if(p.key=="fire_point")value=p.value;
+                auto row=lab::MakeWeaponParameter(key,value,"Параметр отсутствует; будет добавлен при редактировании.");row.step=.001;row.minimum=-1;row.maximum=1;row.integer=false;ui_.hudParameters.push_back(std::move(row));}
+        }
+        lab::HudConfiguration checked;
+        if(!lab::ReadWeaponHUD(data_,section_,checked,error))ui_.hudWarning=error;
+        else {ui_.hudWarning="Общая секция HUD: изменения действуют на всё оружие, которое на неё ссылается.";hud_=std::move(checked);}
+    }
+    void refreshEffects() {
+        const bool changed=effectSection_!=section_;
+        if(changed){ui_.effectPickerOpen=false;ui_.effectCandidate.clear();effectPreviewView_.Reset();ui_.effectSlot=-1;}
+        auto old=ui_.effects;ui_.effects.clear();effectSection_=section_;
+        if(!current()||ui_.catalog!=lab::WeaponCatalog::Weapons)return;
+        lab::WeaponConfigValues v;std::string error;if(!data_.sectionValues(section_,v,error))return;
+        for(const auto& slot:lab::WeaponEffectSlots()){
+            lab::WeaponEffectRow row;row.key=slot.key;row.label=slot.label;row.point=slot.point;row.name=lab::ConfigString(v,slot.key);row.enabled=!row.name.empty();
+            const auto id=section_+"/"+slot.key;if(row.enabled)rememberedEffects_[id]=row.name;row.remembered=rememberedEffects_[id];
+            if(!changed)for(const auto& e:old)if(e.key==row.key)row.visible=e.visible;
+            ui_.effects.push_back(std::move(row));}
+    }
+    void reloadEffects() {
+        lab::ParticleLibrary next;std::string error;particleTextures_.clear();ui_.effectNames.clear();effectPreviewView_.Reset();ui_.effectCandidate.clear();renderer_.ClearParticlePreview();
+        if(!next.load(readBytes(fs::u8path(loadedPaths_.values[6])),error)){particles_=lab::ParticleLibrary{};ui_.particleLibraryStatus="particles.xr: "+error;return;}
+        particles_=std::move(next);for(const auto& e:particles_.entries())ui_.effectNames.push_back(e.name);
+        ui_.particleLibraryStatus="particles.xr: "+std::to_string(ui_.effectNames.size())+" эффектов и групп.";updateEffectsPreview();
+    }
+    lab::Image effectTexture(const std::string& name) {
+        auto existing=particleTextures_.find(name);if(existing!=particleTextures_.end())return existing->second;
+        std::string error;auto path=assetPath(fs::u8path(loadedPaths_.values[5]),name,L".dds","textures/");auto image=path.empty()?lab::Image{}:loadImage(path,error);
+        size_t bytes=image.pixels.size()*sizeof(lab::Pixel);for(const auto& pair:particleTextures_)bytes+=pair.second.pixels.size()*sizeof(lab::Pixel);
+        if(bytes>128u*1024u*1024u)particleTextures_.clear();particleTextures_[name]=image;return image;
+    }
+    bool emitterPoint(const std::string& key,lab::V3& point,std::string& error)const {
+        if(renderer_.HudView()){
+            lab::HudMatrix bone;if(!renderer_.BoneTransform(hud_.fireBone,bone)){error="В HUD нет fire_bone: "+hud_.fireBone;return false;}
+            if(key=="shell_point"&&!hud_.hasShellPoint){error="В HUD отсутствует shell_point.";return false;}
+            const auto local=key=="shell_point"?hud_.shellPoint:key=="fire_point2"?hud_.firePoint2:hud_.firePoint;point=lab::HudPoint(bone,local);return true;
+        }
+        lab::WeaponConfigValues values;if(!data_.sectionValues(section_,values,error))return false;auto found=values.find(key);
+        if(found==values.end()&&key=="fire_point2")found=values.find("fire_point");std::vector<double> n;
+        if(found==values.end()||!lab::ParseWeaponNumbers(found->second,n)||n.size()!=3){error="Нет корректной точки World: "+key;return false;}
+        point={float(n[0]),float(n[1]),float(n[2])};return true;
+    }
+    void updateMarkers() {
+        ui_.markers.clear();if(!ui_.hasModel||!ui_.showEmitters||ui_.catalog!=lab::WeaponCatalog::Weapons)return;
+        for(const auto* key:{"fire_point","fire_point2","shell_point"}){lab::V3 point;std::string error;if(!emitterPoint(key,point,error))continue;
+            lab::WeaponMarker marker;marker.label=key;marker.visible=renderer_.ProjectPoint(point,marker.x,marker.y,true);ui_.markers.push_back(marker);}
+    }
+    void updateEffectsPreview() {
+        renderer_.ClearParticlePreview();ui_.effectStatus.clear();if(!ui_.hasModel||ui_.catalog!=lab::WeaponCatalog::Weapons)return;
+        std::vector<std::pair<lab::ParticleLayer,lab::HudMatrix>> layers;std::vector<lab::Image> textures;
+        for(const auto& slot:ui_.effects){if(!slot.visible)continue;const auto name=slot.enabled?slot.name:slot.remembered;
+            if(name.empty()){ui_.effectStatus+=slot.label+": выберите эффект.\n";continue;}
+            lab::V3 point;std::string error;if(!emitterPoint(slot.point,point,error)){ui_.effectStatus+=error+"\n";continue;}
+            auto transform=lab::HudIdentity();transform[12]=point.x;transform[13]=point.y;transform[14]=point.z;
+            if(renderer_.HudView()){auto model=lab::HudModelTransform(hud_,ui_.hudAiming);transform=lab::HudParticleBasis(model,lab::HudPoint(model,point));}
+            const auto snapshot=particles_.snapshot(name,ui_.effectTime);
+            for(const auto& w:snapshot.warnings)ui_.effectStatus+=w+"\n";
+            for(const auto& layer:snapshot.layers){if(layer.particles.empty())continue;auto texture=effectTexture(layer.texture);if(!texture.valid()){ui_.effectStatus+="Не найдена текстура: "+layer.texture+"\n";continue;}
+                layers.emplace_back(layer,transform);textures.push_back(std::move(texture));}
+        }
+        std::wstring error;if(!renderer_.SetParticlePreview(layers,textures,error))ui_.effectStatus+=utf8(error);
+        updateMarkers();
+    }
+    void previewEffect(int index) {
+        if(index<0||size_t(index)>=ui_.effectNames.size())return;ui_.effectCandidate=ui_.effectNames[size_t(index)];effectPreviewView_.Reset();
+        auto snapshot=particles_.snapshot(ui_.effectCandidate,ui_.effectTime);ui_.effectStatus="Статичный кадр; фон и масштаб предпросмотра условные.\n";
+        for(const auto& w:snapshot.warnings)ui_.effectStatus+=w+"\n";
+        size_t count=0;for(const auto& layer:snapshot.layers){count+=layer.particles.size();if(!effectTexture(layer.texture).valid())ui_.effectStatus+="Не найдена текстура: "+layer.texture+"\n";}
+        if(count==0)ui_.effectStatus+="В этом кадре нет частиц. Измените время в «Эффектах».\n";
+        auto image=lab::ParticleThumbnail(snapshot,[&](const std::string& name){return effectTexture(name);});if(!texture(image,effectPreviewView_))ui_.effectStatus+="Ошибка создания предпросмотра на GPU.";
+    }
+    bool setEffect(int index,const std::string& name) {
+        if(index<0||size_t(index)>=ui_.effects.size()||!current())return false;
+        if(!flushPendingParameters()){refreshEffects();return false;}
+        const auto key=ui_.effects[size_t(index)].key;std::string error;
+        if(!name.empty()&&!particles_.contains(name)){fail("Эффект отсутствует в выбранном particles.xr: "+name);refreshEffects();return false;}
+        if(key=="shell_particles"&&!name.empty()){
+            lab::WeaponConfigValues v;std::vector<double> n;data_.sectionValues(section_,v,error);
+            if(!lab::ParseWeaponNumbers(lab::ConfigString(v,"shell_point"),n)||n.size()!=3){fail("Сначала задайте World shell_point в параметрах оружия.");refreshEffects();return false;}
+            if(!ui_.hudSection.empty()&&(!data_.sectionValues(ui_.hudSection,v,error)||!lab::ParseWeaponNumbers(lab::ConfigString(v,"shell_point"),n)||n.size()!=3)){fail("Сначала задайте HUD shell_point: движок читает его при подключённых гильзах.");refreshEffects();return false;}}
+        if(!data_.setValue(section_,key,name,error)){fail(error);refreshEffects();return false;}
+        refreshRows();refreshCurrent();updateEffectsPreview();ui_.status="Изменён "+key+". Нажмите «Сохранить» для записи LTX.";return true;
+    }
+    void applyHudPreview() {
+        if(!ui_.hasModel||ui_.view!=lab::WeaponView::Hud)return;
+        if(!std::isfinite(ui_.cameraFov))ui_.cameraFov=67.5f;if(!std::isfinite(ui_.hudFovFactor))ui_.hudFovFactor=.45f;
+        ui_.cameraFov=std::clamp(ui_.cameraFov,5.f,179.f);ui_.hudFovFactor=std::clamp(ui_.hudFovFactor,.1f,1.f);
+        std::string error;if(!lab::ReadWeaponHUD(data_,section_,hud_,error)){fail(error);return;}
+        renderer_.SetHudView(true,lab::HudModelTransform(hud_,ui_.hudAiming),ui_.cameraFov*ui_.hudFovFactor,ui_.cameraFov);
+        std::wstring renderError;
+        if(ui_.hudMotionIndex>=0){if(!renderer_.SetAnimationPose(size_t(ui_.hudMotionIndex),ui_.hudMotionTime,true,renderError))fail(utf8(renderError));}
+        else if(!renderer_.SetBindPose(&renderError))fail(utf8(renderError));
+        lab::HudMatrix bone;if(!renderer_.BoneTransform(hud_.fireBone,bone))ui_.hudWarning="В модели нет fire_bone: "+hud_.fireBone+". Исправьте имя перед запуском игры.";
+        updateEffectsPreview();
+    }
     void refreshCurrent(bool rebuildParameters=true) {
-        const auto* w=current();if(!w){ui_.parameters.clear();ui_.name.clear();ui_.description.clear();ui_.nameId.clear();ui_.descriptionId.clear();ui_.canEditName=false;ui_.canEditDescription=false;clearModel();updateSimulation();return;}
+        const auto* w=current();if(!w){ui_.parameters.clear();ui_.name.clear();ui_.description.clear();ui_.nameId.clear();ui_.descriptionId.clear();ui_.canEditName=false;ui_.canEditDescription=false;refreshHud(true);refreshEffects();clearModel();updateSimulation();return;}
         if(!textDraftPending_){ui_.name=w->name;ui_.description=w->description;}ui_.nameId=w->nameId;ui_.descriptionId=w->descriptionId;
         ui_.canEditName=!w->nameId.empty();ui_.canEditDescription=!w->descriptionId.empty();
         ui_.currentIconX=w->iconX;ui_.currentIconY=w->iconY;ui_.currentIconW=w->iconWidth;ui_.currentIconH=w->iconHeight;
         if(rebuildParameters){
             ui_.parameters.clear();for(const auto& p:w->values)ui_.parameters.push_back(lab::MakeWeaponParameter(p.key,p.value,p.sourceFile.u8string()+" ["+p.sourceSection+"]",p.inherited));
+            if(w->kind==lab::WeaponItemKind::Weapon)for(const auto* key:{"shell_point","fire_point2"})if(std::none_of(w->values.begin(),w->values.end(),[&](const auto& p){return p.key==key;})){
+                std::string value="0, 0, 0";if(std::string(key)=="fire_point2")for(const auto& p:w->values)if(p.key=="fire_point")value=p.value;
+                auto row=lab::MakeWeaponParameter(key,value,"Параметр отсутствует; будет добавлен при редактировании.");row.step=.001;row.minimum=-1;row.maximum=1;row.integer=false;ui_.parameters.push_back(std::move(row));}
             ui_.iconX=w->iconX;ui_.iconY=w->iconY;ui_.iconW=w->iconWidth;ui_.iconH=w->iconHeight;
         }
-        updateSimulation();
+        refreshHud(rebuildParameters);refreshEffects();updateSimulation();
     }
     void clearModel() {
         for(size_t i=0;i<renderer_.PartCount();++i)renderer_.SetPartVisible(i,false);
+        renderer_.ClearParticlePreview();ui_.markers.clear();
         ui_.hasModel=false;ui_.meshes.clear();ui_.modelName.clear();snapshot_={};fitted_={};snapshotView_.Reset();ui_.hasSnapshot=false;
     }
     bool loadModel() {
+        if(ui_.hasModel){auto& saved=meshVisibility_[ui_.modelName];saved.clear();for(const auto& p:ui_.meshes)saved.push_back(p.visible);}
         clearModel();const auto* record=current();if(!record)return false;
-        const auto model=assetPath(fs::u8path(loadedPaths_.values[4]),record->visual,L".ogf","meshes/");
-        lab::Mesh mesh;std::string error;
-        if(model.empty()||!lab::LoadOGFMesh(readBytes(model),mesh,error)){fail("Модель "+record->visual+": "+(error.empty()?"файл не найден":error));return false;}
+        const bool hudView=ui_.view==lab::WeaponView::Hud;
+        std::string error,visual=record->visual;
+        if(hudView){if(!lab::ReadWeaponHUD(data_,section_,hud_,error)){fail(error);return false;}visual=hud_.visual;}
+        renderer_.SetHudView(hudView,hudView?lab::HudModelTransform(hud_,ui_.hudAiming):lab::HudIdentity(),ui_.cameraFov*ui_.hudFovFactor,ui_.cameraFov);
+        const auto model=assetPath(fs::u8path(loadedPaths_.values[4]),visual,L".ogf","meshes/");
+        lab::Mesh mesh;
+        if(model.empty()||!lab::LoadOGFMesh(readBytes(model),mesh,error)){fail("Модель "+visual+": "+(error.empty()?"файл не найден":error));return false;}
+        if(hudView){const auto refs=mesh.motionRefs;for(const auto& ref:refs){const auto omf=assetPath(fs::u8path(loadedPaths_.values[4]),ref,L".omf","meshes/");std::string motionError;
+            if(omf.empty()||!lab::LoadOGFMotions(readBytes(omf),mesh,motionError))ui_.hudWarning+=" Не загружены анимации "+ref+": "+motionError;}}
+
         const auto root=fs::u8path(loadedPaths_.values[5]);std::vector<lab::PartImages> images;
         std::vector<lab::EngineTextureMetadata> metadata;std::vector<std::vector<lab::Image>> bumpMips,bumpXMips;
         std::vector<std::string> missing;
@@ -307,6 +435,10 @@ class App {
         }
         renderer_.SkeletonEnabled(false);renderer_.OutlineEnabled(false);renderer_.ClearHover();renderer_.ClearBrushCursor();
         ui_.hasModel=true;ui_.meshes=std::move(meshRows);ui_.modelName=model.u8string();
+        const auto prior=meshVisibility_.find(ui_.modelName);if(prior!=meshVisibility_.end()&&prior->second.size()==ui_.meshes.size())for(size_t i=0;i<ui_.meshes.size();++i){ui_.meshes[i].visible=prior->second[i];renderer_.SetPartVisible(i,prior->second[i]);}
+        if(hudView){ui_.hudMotions.clear();ui_.hudMotionIndex=-1;ui_.hudMotionTime=0;const auto idle=hud_.idleMotion.substr(0,hud_.idleMotion.find(','));
+            for(size_t i=0;i<renderer_.MotionCount();++i){const auto* m=renderer_.MotionAt(i);ui_.hudMotions.push_back(m->name);if(m->name==idle)ui_.hudMotionIndex=int(i);}
+            applyHudPreview();}else updateEffectsPreview();
         ui_.status="Загружено: "+record->label+" ["+record->section+"].";
         if(!missing.empty()){ui_.status+=" Не найдены diffuse: ";for(const auto& name:missing)ui_.status+=name+"; ";}
         return true;
@@ -347,7 +479,7 @@ class App {
         ui_.paths.values[1]=(root/L"config"/L"weapons").u8string();
         ui_.paths.values[2]=(root/L"config"/L"text"/L"rus"/L"string_table_enc_weapons.xml").u8string();
         ui_.paths.values[3]=(root/L"textures"/L"ui"/L"ui_icon_equipment.dds").u8string();
-        ui_.paths.values[4]=(root/L"meshes").u8string();ui_.paths.values[5]=(root/L"textures").u8string();
+        ui_.paths.values[4]=(root/L"meshes").u8string();ui_.paths.values[5]=(root/L"textures").u8string();ui_.paths.values[6]=(root/L"particles.xr").u8string();
     }
     void rememberPaths() {
         const auto ini=settingsFile();bool ok=true;
@@ -392,7 +524,8 @@ class App {
         section_.clear();queuedSelection_.clear();catalogSelection_={};catalogSearch_={};catalogParameterSearch_={};lastSimulationAmmo_.clear();simulationSection_.clear();ui_.ammunition.clear();
         ui_.catalog=lab::WeaponCatalog::Weapons;ui_.forceCatalogTab=true;ui_.search.clear();ui_.parameterSearch.clear();ui_.descriptionEdit={};
         editedIconSections_.clear();textDraftPending_=false;ui_.parameters.clear();ui_.name.clear();ui_.description.clear();ui_.nameId.clear();ui_.descriptionId.clear();
-        clearModel();refreshRows();updateSimulation();updateAtlas();ui_.setupOpen=false;rememberPaths();
+        ui_.hudParameters.clear();ui_.hudSection.clear();ui_.hudAvailable=false;ui_.view=lab::WeaponView::Model;ui_.effectPickerOpen=false;ui_.effects.clear();effectSection_.clear();rememberedEffects_.clear();meshVisibility_.clear();renderer_.SetHudView(false);
+        clearModel();refreshRows();updateSimulation();updateAtlas();reloadEffects();ui_.setupOpen=false;rememberPaths();
         ui_.status="Найдено оружия: "+std::to_string(data_.weapons().size())+", типов патронов: "+std::to_string(data_.ammunition().size())+". Выберите вкладку и предмет слева.";
         return true;
     }
@@ -441,11 +574,15 @@ class App {
         updateAtlas();
         ui_.status="Снимок вставлен в рабочую копию атласа, координаты внесены в конфиг. Нажмите «Сохранить».";
     }
-    bool hasPendingParameters()const {for(const auto& p:ui_.parameters)if(p.pending)return true;return false;}
+    bool hasPendingParameters()const {for(const auto* rows:{&ui_.parameters,&ui_.hudParameters})for(const auto& p:*rows)if(p.pending)return true;return false;}
     bool flushPendingParameters() {
         for(auto& p:ui_.parameters)if(p.pending){std::string error;
-            if(!data_.setValue(section_,p.key,p.value,error)){fail("Исправьте значение "+p.key+": "+error);return false;}p.pending=false;
+            if(!lab::ValidateHudParameter(p.key,p.value,error)||!data_.setValue(section_,p.key,p.value,error)){fail("Исправьте значение "+p.key+": "+error);return false;}p.pending=false;
             if(p.key=="inv_grid_x"||p.key=="inv_grid_y"||p.key=="inv_grid_width"||p.key=="inv_grid_height")editedIconSections_.insert(section_);
+        }
+        for(auto& p:ui_.hudParameters)if(p.pending){std::string error;
+            if(p.key=="fire_bone"&&ui_.hasModel&&renderer_.HudView()){lab::HudMatrix bone;lab::WeaponConfigValues value{{p.key,p.value}};if(!renderer_.BoneTransform(lab::ConfigString(value,p.key),bone)){fail("В HUD-модели нет кости: "+p.value);return false;}}
+            if(!lab::ValidateHudParameter(p.key,p.value,error)||!data_.setValue(ui_.hudSection,p.key,p.value,error)){fail("Исправьте HUD "+p.key+": "+error);return false;}p.pending=false;
         }return true;
     }
     bool flushPendingTexts() {
@@ -459,6 +596,40 @@ class App {
     void action(lab::WeaponAction what,int value) {
         using A=lab::WeaponAction;std::string error;
         switch(what){
+        case A::SelectModelView:
+            if(value!=int(lab::WeaponView::Model)&&value!=int(lab::WeaponView::Hud))break;
+            if(value==int(lab::WeaponView::Hud)&&(!ui_.hudAvailable||ui_.catalog!=lab::WeaponCatalog::Weapons))break;
+            if(!flushPendingParameters()||!flushPendingTexts())break;
+            stopInput();ui_.view=lab::WeaponView(value);ui_.tab=lab::WeaponTab::Parameters;ui_.forceTab=true;loadModel();break;
+        case A::ChangeHudParameter:
+            if(value>=0&&size_t(value)<ui_.hudParameters.size()&&!ui_.hudSection.empty()){
+                auto& row=ui_.hudParameters[size_t(value)];const auto key=row.key;
+                if(key=="fire_bone"&&ui_.hasModel&&renderer_.HudView()){lab::HudMatrix bone;lab::WeaponConfigValues value{{key,row.value}};if(!renderer_.BoneTransform(lab::ConfigString(value,key),bone)){row.pending=true;fail("В HUD-модели нет кости: "+row.value);break;}}
+                if(!lab::ValidateHudParameter(key,row.value,error)||!data_.setValue(ui_.hudSection,key,row.value,error)){row.pending=true;fail(error);break;}
+                row.pending=false;
+                if(key=="visual")loadModel();else applyHudPreview();
+                ui_.status="Изменён HUD ["+ui_.hudSection+"] "+key+"; требуется сохранение LTX.";
+            }break;
+        case A::HudPreviewSettings:stopInput();applyHudPreview();break;
+        case A::EffectVisibility:updateEffectsPreview();break;
+        case A::EffectEnabled:
+            if(value>=0&&size_t(value)<ui_.effects.size()){
+                const auto row=ui_.effects[size_t(value)];
+                if(row.enabled&&row.remembered.empty()){refreshEffects();ui_.effectSlot=value;ui_.effectPickerOpen=true;fail("Выберите эффект для подключения.");}
+                else setEffect(value,row.enabled?row.remembered:std::string{});
+            }break;
+        case A::OpenEffectPicker:
+            if(value>=0&&size_t(value)<ui_.effects.size()){
+                ui_.effectSlot=value;ui_.effectPickerOpen=true;const auto& row=ui_.effects[size_t(value)];const auto name=row.enabled?row.name:row.remembered;
+                auto i=std::find(ui_.effectNames.begin(),ui_.effectNames.end(),name);if(i!=ui_.effectNames.end())previewEffect(int(i-ui_.effectNames.begin()));
+                else {ui_.effectCandidate.clear();effectPreviewView_.Reset();ui_.effectStatus="Выберите эффект в списке.";}
+            }break;
+        case A::PreviewEffect:previewEffect(value);break;
+        case A::ConnectEffect:
+            if(!ui_.effectCandidate.empty()&&setEffect(ui_.effectSlot,ui_.effectCandidate)){
+                ui_.effects[size_t(ui_.effectSlot)].visible=true;ui_.effectPickerOpen=false;updateEffectsPreview();}
+            break;
+        case A::ReloadEffects:reloadEffects();break;
         case A::SelectCatalog:selectCatalog(value);break;
         case A::SelectWeapon:
             if(!queuedSelection_.empty()){
@@ -474,18 +645,22 @@ class App {
         case A::BrowsePath:{
             stopInput();std::wstring file;
             if(value==2)file=chooseFile(window_,L"String table XML\0*.xml\0Все файлы\0*.*\0",L"xml",false,fs::u8path(ui_.paths.values[2]));
+            else if(value==6)file=chooseFile(window_,L"Particle library\0*.xr\0Все файлы\0*.*\0",L"xr",false,fs::u8path(ui_.paths.values[6]));
             else if(value==3)file=chooseFile(window_,L"DDS atlas\0*.dds\0Все файлы\0*.*\0",L"dds",false,fs::u8path(ui_.paths.values[3]));
             else file=chooseFolder(window_);
-            if(!file.empty()&&value>=0&&value<6){ui_.paths.values[size_t(value)]=utf8(file);if(value==0)defaults();}break;}
+            if(!file.empty()&&value>=0&&value<7){ui_.paths.values[size_t(value)]=utf8(file);if(value==0)defaults();}break;}
         case A::ApplyPaths:loadPaths();break;
         case A::ChangeParameter:
             if(value>=0&&size_t(value)<ui_.parameters.size()&&current()){
                 const auto key=ui_.parameters[size_t(value)].key;const auto text=ui_.parameters[size_t(value)].value;
-                if(!data_.setValue(section_,key,text,error)){ui_.parameters[size_t(value)].pending=true;fail(error);break;}
+                if(key=="hud"){
+                    bool failed=false;for(auto& row:ui_.hudParameters)if(row.pending){if(!lab::ValidateHudParameter(row.key,row.value,error)||!data_.setValue(ui_.hudSection,row.key,row.value,error)){failed=true;break;}row.pending=false;}
+                    if(failed){fail(error);break;}}
+                if(!lab::ValidateHudParameter(key,text,error)||!data_.setValue(section_,key,text,error)){ui_.parameters[size_t(value)].pending=true;fail(error);break;}
                 ui_.parameters[size_t(value)].pending=false;
                 if(key=="inv_grid_x"||key=="inv_grid_y"||key=="inv_grid_width"||key=="inv_grid_height")editedIconSections_.insert(section_);
                 refreshRows();refreshCurrent(false);
-                if(key=="visual")loadModel();else ui_.status="Изменён параметр "+key+"; требуется сохранение.";
+                if((key=="visual"&&ui_.view!=lab::WeaponView::Hud)||key=="hud")loadModel();else {updateEffectsPreview();ui_.status="Изменён параметр "+key+"; требуется сохранение.";}
             }break;
         case A::ChangeTexts:
             textDraftPending_=true;
@@ -503,9 +678,9 @@ class App {
             break;
         case A::ShowAllParts:for(size_t i=0;i<ui_.meshes.size();++i){ui_.meshes[i].visible=true;renderer_.SetPartVisible(i,true);}break;
         case A::SetMode:stopInput();renderer_.FlyCameraEnabled(ui_.mode==lab::WeaponMode::Fly);break;
-        case A::Frame:renderer_.FrameSelection();break;
-        case A::ResetView:renderer_.ResetView();break;
-        case A::AxisView:renderer_.AlignAxis(value);break;
+        case A::Frame:if(ui_.view!=lab::WeaponView::Hud)renderer_.FrameSelection();break;
+        case A::ResetView:if(ui_.view!=lab::WeaponView::Hud)renderer_.ResetView();break;
+        case A::AxisView:if(ui_.view!=lab::WeaponView::Hud)renderer_.AlignAxis(value);break;
         case A::LightSettings:lighting();break;
         case A::BackgroundSettings:renderer_.SetBackground(ui_.background);break;
         case A::Wireframe:renderer_.WireframeEnabled(ui_.wireframe);break;
@@ -574,6 +749,8 @@ class App {
         const auto now=GetTickCount64();const float delta=std::clamp(float(now-lastTick_)*.001f,.001f,.05f);lastTick_=now;
         if(dpiPending_){applyDpi();dpiPending_=false;}
         if(ui_.viewportRect.w>1&&ui_.viewportRect.h>1){std::wstring e;if(!renderer_.ResizeScene(UINT(ui_.viewportRect.w),UINT(ui_.viewportRect.h),e))fail(utf8(e));}
+        updateMarkers();
+        ui_.effectPreviewTexture=static_cast<ImTextureID>(reinterpret_cast<intptr_t>(effectPreviewView_.Get()));
         ui_.viewportTexture=static_cast<ImTextureID>(reinterpret_cast<intptr_t>(renderer_.SceneTexture()));
         ui_.atlasTexture=static_cast<ImTextureID>(reinterpret_cast<intptr_t>(atlasView_.Get()));
         ui_.snapshotTexture=static_cast<ImTextureID>(reinterpret_cast<intptr_t>(snapshotView_.Get()));
@@ -588,8 +765,8 @@ class App {
         const HRESULT hr=renderer_.PresentUI();
         // Process mutations after draw lists consumed their SRVs and row references.
         const auto actions=pending_;
-        for(const auto& a:actions)if(a.first==lab::WeaponAction::ChangeParameter||a.first==lab::WeaponAction::ChangeTexts)action(a.first,a.second);
-        for(const auto& a:actions)if(a.first!=lab::WeaponAction::ChangeParameter&&a.first!=lab::WeaponAction::ChangeTexts)action(a.first,a.second);
+        for(const auto& a:actions)if(a.first==lab::WeaponAction::ChangeParameter||a.first==lab::WeaponAction::ChangeHudParameter||a.first==lab::WeaponAction::ChangeTexts)action(a.first,a.second);
+        for(const auto& a:actions)if(a.first!=lab::WeaponAction::ChangeParameter&&a.first!=lab::WeaponAction::ChangeHudParameter&&a.first!=lab::WeaponAction::ChangeTexts)action(a.first,a.second);
         if(FAILED(hr)){
             stopInput();MessageBoxW(window_,L"Direct3D: устройство вывода потеряно. Закройте программу после сохранения изменений.",AppTitle,MB_OK|MB_ICONERROR);
             if(confirmPending())running_=false;else {minimized_=true;ui_.status="Direct3D потерян; закройте окно для повторного предложения сохранения.";}
@@ -631,8 +808,9 @@ public:
         if(!ImGui_ImplDX11_CreateDeviceObjects())return false;
         ui_.paths.values[0]="D:\\Games\\S.T.A.L.K.E.R. Shadow of Chernobyl\\gamedata";defaults();
         const auto ini=settingsFile();std::array<wchar_t,32768> remembered{};
-        bool haveSettings=false;
-        for(size_t i=0;i<ui_.paths.values.size();++i){GetPrivateProfileStringW(L"Paths",std::to_wstring(i).c_str(),L"",remembered.data(),DWORD(remembered.size()),ini.c_str());if(remembered[0]){ui_.paths.values[i]=utf8(remembered.data());haveSettings=true;}}
+        bool haveSettings=false,haveParticlePath=false;
+        for(size_t i=0;i<ui_.paths.values.size();++i){GetPrivateProfileStringW(L"Paths",std::to_wstring(i).c_str(),L"",remembered.data(),DWORD(remembered.size()),ini.c_str());if(remembered[0]){ui_.paths.values[i]=utf8(remembered.data());haveSettings=true;if(i==6)haveParticlePath=true;}}
+        if(!haveParticlePath)ui_.paths.values[6]=(fs::u8path(ui_.paths.values[0])/L"particles.xr").u8string();
         renderer_.FlyCameraEnabled(true);renderer_.SkeletonEnabled(false);renderer_.OutlineEnabled(false);clearModel();lighting();
         if(haveSettings&&!software)loadPaths(false);
         lastTick_=GetTickCount64();frame(false);frame(false);return true;
@@ -660,6 +838,16 @@ public:
         renderer_.SetPartVisible(0,true);lab::Image restored;
         const bool restoredCaptured=renderer_.CaptureTransparent(restored,1024,error);
         check(restoredCaptured&&restored.valid()&&std::any_of(restored.pixels.begin(),restored.pixels.end(),[](lab::Pixel p){return p.a>0;}),"mesh visibility restored");
+        renderer_.SetHudView(true,lab::HudOffset({0,0,4},{0,0,0}),40);float px=0,py=0;
+        check(renderer_.ProjectPoint({0,0,0},px,py)&&std::abs(px-.5f)<.001f&&std::abs(py-.5f)<.001f,"HUD native units and camera centre");
+        lab::Image hudFrame;check(renderer_.CaptureTransparent(hudFrame,512,error)&&std::any_of(hudFrame.pixels.begin(),hudFrame.pixels.end(),[](lab::Pixel p){return p.a>0;}),"HUD first person render");
+        renderer_.SetHudView(false);renderer_.SetPartVisible(0,false);lab::Image withoutParticles,withParticles;
+        check(renderer_.CaptureFrame(withoutParticles),"particle baseline capture");
+        lab::ParticleLayer particle;particle.texture="fixture";particle.shader="particles\\blend";lab::ParticleSample sample;sample.size={.6f,.6f,.6f};particle.particles.push_back(sample);
+        lab::Image sprite;sprite.w=sprite.h=2;sprite.pixels.assign(4,{255,20,10,255});
+        check(renderer_.SetParticlePreview({{particle,lab::HudIdentity()}},{sprite},error),"particle shader and buffers");
+        check(renderer_.CaptureFrame(withParticles)&&withParticles.pixels.size()==withoutParticles.pixels.size()&&std::memcmp(withParticles.pixels.data(),withoutParticles.pixels.data(),withParticles.pixels.size()*sizeof(lab::Pixel))!=0,"static game sprite pass is visible");
+        renderer_.ClearParticlePreview();renderer_.SetPartVisible(0,true);
         std::string e;auto icon=lab::FitIconSnapshot(shot,250,100,2,e);check(icon.valid(),"snapshot fit");
         const auto temporary=fs::temp_directory_path()/(L"WeaponLab-smoke-"+std::to_wstring(GetCurrentProcessId())+L".png");
         check(saveTransparentPNG(temporary,icon,e),"WIC PNG write");const auto reopened=loadImage(temporary,e);

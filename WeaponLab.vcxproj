@@ -176,11 +176,14 @@ copy /Y "$(ProjectDir)assets\Preview.hlsl" "$(OutDir)assets\Preview.hlsl" &gt;nu
     <ClCompile Include="src\Core.cpp" />
     <ClCompile Include="src\WeaponData.cpp" />
     <ClCompile Include="src\WeaponSimulation.cpp" />
+    <ClCompile Include="src\WeaponHUD.cpp" />
+    <ClCompile Include="src\ParticleLibrary.cpp" />
     <ClCompile Include="src\IconAtlas.cpp" />
     <ClCompile Include="src\WeaponUI.cpp" />
     <ClCompile Include="src\DDS.cpp" />
     <ClCompile Include="src\OGF.cpp" />
     <ClCompile Include="src\Renderer.cpp" />
+    <ClCompile Include="src\RendererParticles.cpp" />
     <ClCompile Include="src\WinApp.cpp" />
     <ClCompile Include="src\StartupSplash.cpp" />
     <ClCompile Include="third_party\imgui\imgui.cpp" />
@@ -194,6 +197,8 @@ copy /Y "$(ProjectDir)assets\Preview.hlsl" "$(OutDir)assets\Preview.hlsl" &gt;nu
     <ClInclude Include="src\Core.h" />
     <ClInclude Include="src\WeaponData.h" />
     <ClInclude Include="src\WeaponSimulation.h" />
+    <ClInclude Include="src\WeaponHUD.h" />
+    <ClInclude Include="src\ParticleLibrary.h" />
     <ClInclude Include="src\IconAtlas.h" />
     <ClInclude Include="src\WeaponUI.h" />
     <ClInclude Include="src\Resource.h" />

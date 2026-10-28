@@ -1,5 +1,5 @@
 {
-  "version": "Kichray WeaponLab 0.3.0",
+  "version": "Kichray WeaponLab 0.4.0",
   "base": "Material Lab 0.13.0 restored sources",
   "engine_reference": {
     "repository": "https://github.com/BCZUnofficial/kichray",
@@ -7,7 +7,7 @@
     "commit": "6d832035330a004a2ffabce8d124f17409dcc563"
   },
   "portable_suites": {
-    "passed": 8,
+    "passed": 9,
     "failed": 0,
     "names": [
       "flight-input-tests",
@@ -17,11 +17,12 @@
       "viewport-tests",
       "weapon-data-tests",
       "weapon-simulation-tests",
-      "weapon-ui-tests"
+      "weapon-ui-tests",
+      "weapon-hud-tests"
     ]
   },
   "asan_ubsan_suites": {
-    "passed": 8,
+    "passed": 9,
     "failed": 0,
     "names": [
       "flight-input-tests",
@@ -31,22 +32,23 @@
       "viewport-tests",
       "weapon-data-tests",
       "weapon-simulation-tests",
-      "weapon-ui-tests"
+      "weapon-ui-tests",
+      "weapon-hud-tests"
     ],
     "leak_sanitizer": "disabled via ASAN_OPTIONS=detect_leaks=0"
   },
   "compiler": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04) 13.3.0",
   "windows_compile": "not performed: native compiler and Windows SDK absent",
-  "windows_run": "not performed; --smoke-test provided for native D3D11/WARP/WIC and mesh visibility checks",
-  "github_actions": "current 0.3.0 workflow has not run; base 0.2.0 passed Windows and Linux CI, recorded separately",
+  "windows_run": "not performed; --smoke-test extends prior WARP/PNG checks with HUD native projection and static particles",
+  "github_actions": "0.4.0 has not run in Windows CI; current native smoke source includes HUD and particle passes",
   "retained_bytes": {
     "src/Renderer.cpp": {
-      "matches_base": true,
-      "sha256": "5250e1f4ef9620df44077bc1dd4b9345b09bfd0648bf63d08c700c2236d0fc96"
+      "matches_base": false,
+      "sha256": "64f47a97c51d1afa45682000d5b8a45c5f78c89b0517bdcf58c1b1d916a49c3a"
     },
     "src/Renderer.h": {
-      "matches_base": true,
-      "sha256": "656d980b26a0556dc9d8aef92cf7f513890b4fc2c5e1fc263100def96745523d"
+      "matches_base": false,
+      "sha256": "a45e5a19d267f0fd57431d8b7fef3ebaac9164fda2c3bad53679ed4601d639d6"
     },
     "src/FlightInput.h": {
       "matches_base": true,
@@ -93,27 +95,33 @@
     "src/IconAtlas.h": "a9d28458c629dbfa6c0b3089fe895ce93ab589967a4a65396c2139265b96ee49",
     "src/MaterialAlpha.h": "a9c47518c7166b556827eb7ebbd130768c23cecd94794222c09bba3412c66572",
     "src/OGF.cpp": "e1ae9bfca9da233a13ee6b0a8ebadc6ababcddb477d05bbe4894163d0b970fc7",
+    "src/ParticleLibrary.cpp": "5b8342707f3a42cd08447adf65b531565e4a4c40a26d63230d6f094378337c0a",
+    "src/ParticleLibrary.h": "04e748c529954130c7c0b646a42aca17e43462c410b921c0868271a01af60c81",
     "src/Resource.h": "3af575e3fc7ef9a2fc217eb33b7ccbaafa73bca45c240e8c6eec95c2983c9386",
     "src/ViewportTools.h": "bf750a28814d057f43dc4e794508be9023f792fb6fcc767b217e764cafd99489",
-    "src/WeaponData.cpp": "9c821eaf0537aa7a108319ad0da3fa228a918b750e4a3fb258fe405b27b9b454",
-    "src/WeaponData.h": "7a72741f9b2fa82ddf9dd9b6e883bb9811ed77070bf356ab16c34ad7b4a907e3",
+    "src/WeaponData.cpp": "9af0e63d2a7574559f169e4954d8e006523fc9e0d38ede5ef12438cd8a116e75",
+    "src/WeaponData.h": "785afaa0fad3c035d6bb638273f69db74c7aa921e1693ed535067807680098f5",
+    "src/WeaponHUD.cpp": "dd4e89fe1cdb57ed0e94aaf0de6e755796e07f90574277e2a840b04d7c334982",
+    "src/WeaponHUD.h": "b763892b9470740cbe0d0fe076da1932be59c48e23e8a914e539ca0a223ae926",
     "src/WeaponSimulation.cpp": "38b3b25eb550b09fc0e6a1bb296fd20096b55091a1468179761a7a78373dc1e1",
     "src/WeaponSimulation.h": "df7b86b010eb7a2ca8e0892fd36b78fcc01ced9e8faaa459c30d2b72d0a8a73a",
-    "src/WeaponUI.cpp": "79222a07c253a91e9ab7fc9066fd0d4ad154c5fb6f5ee9b546a9cd43af762a7e",
-    "src/WeaponUI.h": "9f75bd7189390d191277357f661ad38ffe1e82ce45df1915ed1c43ee78250dff",
+    "src/WeaponUI.cpp": "facef08b8f31e29bc75d23e0d272f49dfc74792df6eebbe06a4fbb6bc01085c9",
+    "src/WeaponUI.h": "1e43f19fc64dabcb40a10425c99fdf2e41661742f159f06afe905c0820f08e5a",
     "tests/FlightInputTests.cpp": "bae12ce3ec80f30a604ef395bb6171a073296ea1db5133b7ed77729e4202955a",
     "tests/IconAtlasTests.cpp": "b14d3973acea180f8f2e0852312038e71ba2f66397118777cb287a8431193465",
     "tests/ParserTests.cpp": "1b816e0909722225bc60b03b4a882dd619041728933992732bca51425a3b7624",
     "tests/RendererPreviewTests.cpp": "fb1f1b6dde5ae222ed50471a5908f8d222246c85b3c0115c76085d105cb7d279",
     "tests/ViewportToolsTests.cpp": "e8900e838d3d3dcbca5082c21292adc31cd074443d07e1c5afb4be59f0dac953",
     "tests/WeaponDataTests.cpp": "8246f67c8126da2b147dd4c7ffe29e0f6c36796dbbc9a7464a9ad457493561eb",
+    "tests/WeaponHUDTests.cpp": "6468a7f97354ba04cd4438b01d62ef5440fac4825a0a406fe714917dbf4c10e0",
     "tests/WeaponSimulationTests.cpp": "2c11885caffd277e4ce78086f9f366f5609a9868f1d815a995f11aedde7460d3",
-    "tests/WeaponUITests.cpp": "aa892faa929e3fc93891c54dec35daf772c7b5b3c45335719646d5732866d4b5"
+    "tests/WeaponUITests.cpp": "ac51dc3384fb8e6fc2cab3855d3a1cf7861391ccaf6cb10a8e485bbc6c340c08"
   },
   "windows_source_sha256": {
-    "src/WinApp.cpp": "52505ad393b8ede3f3750ac7b95d1d38607ed8970717fb66771677d69bf8526e",
-    "src/Renderer.cpp": "5250e1f4ef9620df44077bc1dd4b9345b09bfd0648bf63d08c700c2236d0fc96",
-    "src/Renderer.h": "656d980b26a0556dc9d8aef92cf7f513890b4fc2c5e1fc263100def96745523d",
+    "src/WinApp.cpp": "fc6cbb5c84152c04c17835f80611c3d46e9a1331af87c68c8258076ed56a793b",
+    "src/Renderer.cpp": "64f47a97c51d1afa45682000d5b8a45c5f78c89b0517bdcf58c1b1d916a49c3a",
+    "src/RendererParticles.cpp": "ef787c962eec55c3ab0121434eddac35f85857975e1ebeb7983c93a39d100e40",
+    "src/Renderer.h": "a45e5a19d267f0fd57431d8b7fef3ebaac9164fda2c3bad53679ed4601d639d6",
     "src/StartupSplash.cpp": "8dc6fe8307743a488e4121aaf7e9e9748828634c304f6e9538304de1777e2c20",
     "src/StartupSplash.h": "dd50faa092ea9dd777d89033280ff3c70ecd16d0addec56abbc96028ef896181"
   },
@@ -127,5 +135,17 @@
     "linux_result": "success: ASan/UBSan suites",
     "applies_to_current_0_3_release": false,
     "evidence": "GitHub run and jobs API inspected by parent agent; uploaded 0.2 tree matches the local 0.2 baseline"
-  }
+  },
+  "remote_base": {
+    "commit": "9c84315c9f4a2e197ef8f2a09c709bfe1f915c3b",
+    "tree": "973d3b51a77c5c40400de9ec34aa250228719769",
+    "matches_local_0_3_tree": true
+  },
+  "limitations": [
+    "No actual user gamedata assets available for HUD/particle rendering here",
+    "Partial PAPI static evaluator: unsupported actions and children are reported",
+    "No game shaders.xr execution; custom particle appearance is approximate",
+    "LZH-compressed particles.xr chunks rejected",
+    "Native Windows compile/run pending"
+  ]
 }
