@@ -251,6 +251,7 @@ void effectPane(WeaponUIState& s,const WeaponUICallback& action) {
     if(fullButton("Перечитать particles.xr"))action(WeaponAction::ReloadEffects,0);
     ImGui::TextWrapped("Sprite-предпросмотр без игровых шейдеров мягких частиц и искажения.");
     ImGui::TextWrapped("Статичный кадр из игровой библиотеки. «Показывать» меняет только предпросмотр; «В игре» меняет LTX после сохранения.");
+    if(ImGui::Checkbox("Автокадр для коротких эффектов",&s.effectAutoFrame))action(WeaponAction::EffectVisibility,-1);
     ImGui::SetNextItemWidth(-1);
     if(ImGui::SliderFloat("##EffectTime",&s.effectTime,.033f,4.f,"Кадр: %.3f с"))action(WeaponAction::EffectVisibility,-1);
     for(size_t i=0;i<s.effects.size();++i){auto& e=s.effects[i];ImGui::PushID(int(i));
@@ -272,6 +273,9 @@ void effectPicker(WeaponUIState& s,const WeaponUICallback& action) {
     ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x*.5f,io.DisplaySize.y*.5f),ImGuiCond_Appearing,ImVec2(.5f,.5f));
     if(ImGui::Begin("Выбор эффекта",&s.effectPickerOpen,ImGuiWindowFlags_NoSavedSettings)){
         ImGui::TextWrapped("Подключение изменит параметр только после нажатия кнопки ниже; запись файла — общей кнопкой «Сохранить».");
+        if(ImGui::Checkbox("Автокадр для коротких эффектов",&s.effectAutoFrame))action(WeaponAction::EffectVisibility,-1);
+        ImGui::SetNextItemWidth(-1);
+        if(ImGui::SliderFloat("##PickerTime",&s.effectTime,.033f,4.f,"Кадр: %.3f с"))action(WeaponAction::EffectVisibility,-1);
         ImGui::SetNextItemWidth(-1);textInput("##EffectSearch",s.effectSearch);
         const float width=ImGui::GetContentRegionAvail().x;
         ImGui::BeginChild("EffectList",ImVec2(width*.45f,std::max(100.f,ImGui::GetContentRegionAvail().y-90*s.uiScale)),ImGuiChildFlags_Borders);
@@ -281,7 +285,7 @@ void effectPicker(WeaponUIState& s,const WeaponUICallback& action) {
         const float preview=std::max(64.f,std::min(width*.50f,320*s.uiScale));
         if(s.effectPreviewTexture)ImGui::Image(s.effectPreviewTexture,ImVec2(preview,preview));
         ImGui::PushTextWrapPos(ImGui::GetCursorPosX()+preview);ImGui::TextUnformatted(s.effectCandidate.c_str());
-        ImGui::TextUnformatted(s.effectStatus.c_str());ImGui::PopTextWrapPos();ImGui::EndGroup();
+        ImGui::TextUnformatted(s.effectPreviewStatus.c_str());ImGui::PopTextWrapPos();ImGui::EndGroup();
         ImGui::BeginDisabled(s.effectCandidate.empty()||s.effectSlot<0);
         if(fullButton("Подключить выбранный эффект"))action(WeaponAction::ConnectEffect,0);ImGui::EndDisabled();
         if(fullButton("Закрыть"))s.effectPickerOpen=false;
@@ -597,7 +601,7 @@ void DrawWeaponUI(WeaponUIState& s,const WeaponUICallback& action) {
     const bool pending=std::any_of(s.parameters.begin(),s.parameters.end(),[](const WeaponParameter& p){return p.pending;})||std::any_of(s.hudParameters.begin(),s.hudParameters.end(),[](const WeaponParameter& p){return p.pending;});
     ImGui::BeginDisabled(!(s.dataDirty||s.atlasDirty||pending));if(ImGui::Button("Сохранить  Ctrl+S"))action(WeaponAction::SaveData,0);ImGui::EndDisabled();
     ImGui::SameLine();ImGui::BeginDisabled(!(s.dataDirty||pending));if(ImGui::Button("Отменить правки"))action(WeaponAction::DiscardData,0);ImGui::EndDisabled();
-    ImGui::SameLine();ImGui::TextDisabled("%s",s.dataDirty||s.atlasDirty||pending?"Есть правки":"WeaponLab 0.4.0");
+    ImGui::SameLine();ImGui::TextDisabled("%s",s.dataDirty||s.atlasDirty||pending?"Есть правки":"WeaponLab 0.4.1");
     const float width=ImGui::GetContentRegionAvail().x,spacing=ImGui::GetStyle().ItemSpacing.x;
     const auto& style=ImGui::GetStyle();
     const float catalogMinimum=std::max(175.f,ImGui::CalcTextSize("Оружие").x+ImGui::CalcTextSize("Патроны").x+

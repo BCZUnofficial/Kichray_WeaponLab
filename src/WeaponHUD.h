@@ -12,6 +12,8 @@ HudMatrix HudOffset(V3 position,V3 headingPitchBankDegrees);
 V3 HudPoint(const HudMatrix& matrix,V3 point);
 V3 HudDirection(const HudMatrix& matrix,V3 direction);
 HudMatrix HudParticleBasis(const HudMatrix& hud,V3 origin);
+// Editor attachment: preserve all three model rotation axes, including bank.
+HudMatrix HudEmitterTransform(const HudMatrix& hud,V3 modelPoint);
 std::string ConfigString(const WeaponConfigValues& values,const std::string& key);
 struct HudConfiguration {
     std::string section,visual,fireBone,idleMotion;

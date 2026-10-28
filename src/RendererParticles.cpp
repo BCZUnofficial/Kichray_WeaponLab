@@ -20,10 +20,10 @@ XMMATRIX Renderer::rawModelWorld()const{
 bool Renderer::BoneTransform(const std::string& name,HudMatrix& out)const{
     for(size_t i=0;i<bones_.size();++i)if(bones_[i].name==name&&i<boneTransforms_.size()){std::memcpy(out.data(),&boneTransforms_[i],sizeof(XMFLOAT4X4));return true;}return false;
 }
-bool Renderer::ProjectPoint(V3 p,float& x,float& y,bool particleProjection)const{
+bool Renderer::ProjectPoint(V3 p,float& x,float& y)const{
     if(!width_||!height_)return false;auto eye=camera_.eye(),up=camera_.up();
     auto view=hudView_?XMMatrixIdentity():XMMatrixLookAtLH(XMVectorSet(eye.x,eye.y,eye.z,1),XMVectorSet(camera_.pivot.x,camera_.pivot.y,camera_.pivot.z,1),XMVectorSet(up.x,up.y,up.z,0));
-    auto projection=XMMatrixPerspectiveFovLH(hudView_?XMConvertToRadians(particleProjection?sceneCameraFov_:hudFov_):XM_PIDIV4,float(width_)/height_,hudView_?.2f:.005f,100.f);
+    auto projection=XMMatrixPerspectiveFovLH(hudView_?XMConvertToRadians(hudFov_):XM_PIDIV4,float(width_)/height_,hudView_?.2f:.005f,100.f);
     XMFLOAT4 q;XMStoreFloat4(&q,XMVector4Transform(XMVectorSet(p.x,p.y,p.z,1),rawModelWorld()*view*projection));
     if(!std::isfinite(q.w)||q.w<=.005f||q.z<0)return false;x=.5f+q.x/q.w*.5f;y=.5f-q.y/q.w*.5f;return x>=0&&x<=1&&y>=0&&y<=1;
 }
@@ -49,8 +49,10 @@ float4 PS(P p):SV_TARGET {return sprite.Sample(sampler0,p.uv)*p.color;}
     d.ByteWidth=4096*6*sizeof(SpriteVertex);d.Usage=D3D11_USAGE_DYNAMIC;d.BindFlags=D3D11_BIND_VERTEX_BUFFER;d.CPUAccessFlags=D3D11_CPU_ACCESS_WRITE;
     if(SUCCEEDED(hr))hr=device_->CreateBuffer(&d,nullptr,&particleVB_);
     D3D11_BLEND_DESC b{};auto& t=b.RenderTarget[0];t.BlendEnable=TRUE;t.SrcBlend=D3D11_BLEND_SRC_ALPHA;t.DestBlend=D3D11_BLEND_ONE;t.BlendOp=D3D11_BLEND_OP_ADD;t.SrcBlendAlpha=D3D11_BLEND_ONE;t.DestBlendAlpha=D3D11_BLEND_INV_SRC_ALPHA;t.BlendOpAlpha=D3D11_BLEND_OP_ADD;t.RenderTargetWriteMask=D3D11_COLOR_WRITE_ENABLE_ALL;
+    if(SUCCEEDED(hr))hr=device_->CreateBlendState(&b,&particleAlphaAddBlend_);
+    t.SrcBlend=D3D11_BLEND_ONE; // Blender_Particle: ADD is ONE+ONE, unlike ALPHA-ADD.
     if(SUCCEEDED(hr))hr=device_->CreateBlendState(&b,&particleAddBlend_);
-    if(FAILED(hr)){particleVS_.Reset();particlePS_.Reset();particleInput_.Reset();particleCB_.Reset();particleVB_.Reset();particleAddBlend_.Reset();error=L"Cannot create particle preview GPU resources";return false;}return true;
+    if(FAILED(hr)){particleVS_.Reset();particlePS_.Reset();particleInput_.Reset();particleCB_.Reset();particleVB_.Reset();particleAddBlend_.Reset();particleAlphaAddBlend_.Reset();error=L"Cannot create particle preview GPU resources";return false;}return true;
 }
 bool Renderer::SetParticlePreview(const std::vector<std::pair<ParticleLayer,HudMatrix>>& layers,const std::vector<Image>& images,std::wstring& error){
     particleBatches_.clear();if(layers.empty())return true;if(layers.size()!=images.size()||!initParticles(error))return false;
@@ -59,9 +61,10 @@ bool Renderer::SetParticlePreview(const std::vector<std::pair<ParticleLayer,HudM
 }
 void Renderer::drawParticles(const XMMATRIX& view,const XMMATRIX& projection,V3 eye,V3 up){
     if(particleBatches_.empty()||!particleVS_)return;
-    const D3D11_VIEWPORT viewport={0,0,float(width_),float(height_),0,1};context_->RSSetViewports(1,&viewport);
-    const auto particleProjection=hudView_?XMMatrixPerspectiveFovLH(XMConvertToRadians(sceneCameraFov_),float(width_)/height_,.2f,100.f):projection;
-    XMFLOAT4X4 vp;XMStoreFloat4x4(&vp,view*particleProjection);context_->UpdateSubresource(particleCB_.Get(),0,nullptr,&vp,0,0);
+    // Placement editor: HUD model, attachment markers and sprites share one
+    // projection/depth range. Mixing world FOV with HUD FOV detached the muzzle.
+    const D3D11_VIEWPORT viewport={0,0,float(width_),float(height_),0,hudView_?.02f:1.f};context_->RSSetViewports(1,&viewport);
+    XMFLOAT4X4 vp;XMStoreFloat4x4(&vp,view*projection);context_->UpdateSubresource(particleCB_.Get(),0,nullptr,&vp,0,0);
     auto* cb=particleCB_.Get();auto* vb=particleVB_.Get();auto* sampler=materialSampler_.Get();UINT stride=sizeof(SpriteVertex),offset=0;
     context_->IASetInputLayout(particleInput_.Get());context_->IASetVertexBuffers(0,1,&vb,&stride,&offset);context_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
     context_->VSSetShader(particleVS_.Get(),nullptr,0);context_->PSSetShader(particlePS_.Get(),nullptr,0);context_->VSSetConstantBuffers(0,1,&cb);context_->PSSetSamplers(0,1,&sampler);
@@ -89,7 +92,8 @@ void Renderer::drawParticles(const XMMATRIX& view,const XMMATRIX& projection,V3 
         }
         if(vertices.empty())continue;D3D11_MAPPED_SUBRESOURCE mapped{};if(FAILED(context_->Map(particleVB_.Get(),0,D3D11_MAP_WRITE_DISCARD,0,&mapped)))continue;
         std::memcpy(mapped.pData,vertices.data(),vertices.size()*sizeof(SpriteVertex));context_->Unmap(particleVB_.Get(),0);
-        const float factor[4]={0,0,0,0};context_->OMSetBlendState(ParticleShaderAdditive(layer.shader)?particleAddBlend_.Get():alphaBlend_.Get(),factor,0xffffffffu);
+        const auto mode=ParticleShaderBlend(layer.shader);
+        const float factor[4]={0,0,0,0};context_->OMSetBlendState(mode==ParticleBlend::Add?particleAddBlend_.Get():mode==ParticleBlend::AlphaAdd?particleAlphaAddBlend_.Get():alphaBlend_.Get(),factor,0xffffffffu);
         auto* texture=batch.texture.Get();context_->PSSetShaderResources(0,1,&texture);context_->Draw(UINT(vertices.size()),0);
     }
     context_->OMSetBlendState(nullptr,nullptr,0xffffffffu);context_->OMSetDepthStencilState(nullptr,0);

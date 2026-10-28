@@ -35,7 +35,7 @@ extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND,UINT,WPARAM,LP
 namespace {
 using Microsoft::WRL::ComPtr;
 namespace fs=std::filesystem;
-constexpr const wchar_t* AppTitle=L"Kichray WeaponLab 0.4.0";
+constexpr const wchar_t* AppTitle=L"Kichray WeaponLab 0.4.1";
 std::string utf8(const std::wstring& text) {
     if(text.empty())return {};
     int size=WideCharToMultiByte(CP_UTF8,0,text.data(),int(text.size()),nullptr,0,nullptr,nullptr);
@@ -183,6 +183,7 @@ class App {
     lab::ParticleLibrary particles_;
     lab::HudConfiguration hud_;
     std::map<std::string,lab::Image> particleTextures_;
+    std::map<std::string,lab::ParticleSnapshot> particleFrames_;
     std::map<std::string,std::string> rememberedEffects_;
     std::map<std::string,std::vector<bool>> meshVisibility_;
     std::string effectSection_;
@@ -295,7 +296,7 @@ class App {
             ui_.effects.push_back(std::move(row));}
     }
     void reloadEffects() {
-        lab::ParticleLibrary next;std::string error;particleTextures_.clear();ui_.effectNames.clear();effectPreviewView_.Reset();ui_.effectCandidate.clear();renderer_.ClearParticlePreview();
+        lab::ParticleLibrary next;std::string error;particleTextures_.clear();particleFrames_.clear();ui_.effectNames.clear();effectPreviewView_.Reset();ui_.effectCandidate.clear();renderer_.ClearParticlePreview();
         if(!next.load(readBytes(fs::u8path(loadedPaths_.values[6])),error)){particles_=lab::ParticleLibrary{};ui_.particleLibraryStatus="particles.xr: "+error;return;}
         particles_=std::move(next);for(const auto& e:particles_.entries())ui_.effectNames.push_back(e.name);
         ui_.particleLibraryStatus="particles.xr: "+std::to_string(ui_.effectNames.size())+" эффектов и групп.";updateEffectsPreview();
@@ -305,6 +306,15 @@ class App {
         std::string error;auto path=assetPath(fs::u8path(loadedPaths_.values[5]),name,L".dds","textures/");auto image=path.empty()?lab::Image{}:loadImage(path,error);
         size_t bytes=image.pixels.size()*sizeof(lab::Pixel);for(const auto& pair:particleTextures_)bytes+=pair.second.pixels.size()*sizeof(lab::Pixel);
         if(bytes>128u*1024u*1024u)particleTextures_.clear();particleTextures_[name]=image;return image;
+    }
+    lab::ParticleSnapshot effectSnapshot(const std::string& name) {
+        const auto key=name+"/"+std::to_string(ui_.effectTime)+(ui_.effectAutoFrame?"/auto":"/exact");
+        auto it=particleFrames_.find(key);if(it!=particleFrames_.end())return it->second;
+        auto snapshot=particles_.preview(name,ui_.effectTime,ui_.effectAutoFrame);
+        size_t samples=0;for(const auto& layer:snapshot.layers)samples+=layer.particles.size();
+        for(const auto& frame:particleFrames_)for(const auto& layer:frame.second.layers)samples+=layer.particles.size();
+        if(particleFrames_.size()>=16||samples*sizeof(lab::ParticleSample)>64u*1024u*1024u)particleFrames_.clear();
+        particleFrames_[key]=snapshot;return snapshot;
     }
     bool emitterPoint(const std::string& key,lab::V3& point,std::string& error)const {
         if(renderer_.HudView()){
@@ -320,7 +330,7 @@ class App {
     void updateMarkers() {
         ui_.markers.clear();if(!ui_.hasModel||!ui_.showEmitters||ui_.catalog!=lab::WeaponCatalog::Weapons)return;
         for(const auto* key:{"fire_point","fire_point2","shell_point"}){lab::V3 point;std::string error;if(!emitterPoint(key,point,error))continue;
-            lab::WeaponMarker marker;marker.label=key;marker.visible=renderer_.ProjectPoint(point,marker.x,marker.y,true);ui_.markers.push_back(marker);}
+            lab::WeaponMarker marker;marker.label=key;marker.visible=renderer_.ProjectPoint(point,marker.x,marker.y);ui_.markers.push_back(marker);}
     }
     void updateEffectsPreview() {
         renderer_.ClearParticlePreview();ui_.effectStatus.clear();if(!ui_.hasModel||ui_.catalog!=lab::WeaponCatalog::Weapons)return;
@@ -329,10 +339,11 @@ class App {
             if(name.empty()){ui_.effectStatus+=slot.label+": выберите эффект.\n";continue;}
             lab::V3 point;std::string error;if(!emitterPoint(slot.point,point,error)){ui_.effectStatus+=error+"\n";continue;}
             auto transform=lab::HudIdentity();transform[12]=point.x;transform[13]=point.y;transform[14]=point.z;
-            if(renderer_.HudView()){auto model=lab::HudModelTransform(hud_,ui_.hudAiming);transform=lab::HudParticleBasis(model,lab::HudPoint(model,point));}
-            const auto snapshot=particles_.snapshot(name,ui_.effectTime);
-            for(const auto& w:snapshot.warnings)ui_.effectStatus+=w+"\n";
-            for(const auto& layer:snapshot.layers){if(layer.particles.empty())continue;auto texture=effectTexture(layer.texture);if(!texture.valid()){ui_.effectStatus+="Не найдена текстура: "+layer.texture+"\n";continue;}
+            if(renderer_.HudView()){auto model=lab::HudModelTransform(hud_,ui_.hudAiming);transform=lab::HudEmitterTransform(model,point);}
+            const auto snapshot=effectSnapshot(name);
+            for(const auto& w:snapshot.warnings)ui_.effectStatus+=slot.label+": "+w+"\n";
+            if(!lab::ParticleSnapshotVisible(snapshot))ui_.effectStatus+=slot.label+": в этом кадре нет видимых частиц. Включите автокадр или измените время.\n";
+            for(const auto& layer:snapshot.layers){if(!(layer.flags&1)||layer.particles.empty())continue;auto texture=effectTexture(layer.texture);if(!texture.valid()){ui_.effectStatus+="Не найдена текстура: "+layer.texture+"\n";continue;}
                 layers.emplace_back(layer,transform);textures.push_back(std::move(texture));}
         }
         std::wstring error;if(!renderer_.SetParticlePreview(layers,textures,error))ui_.effectStatus+=utf8(error);
@@ -340,11 +351,11 @@ class App {
     }
     void previewEffect(int index) {
         if(index<0||size_t(index)>=ui_.effectNames.size())return;ui_.effectCandidate=ui_.effectNames[size_t(index)];effectPreviewView_.Reset();
-        auto snapshot=particles_.snapshot(ui_.effectCandidate,ui_.effectTime);ui_.effectStatus="Статичный кадр; фон и масштаб предпросмотра условные.\n";
-        for(const auto& w:snapshot.warnings)ui_.effectStatus+=w+"\n";
-        size_t count=0;for(const auto& layer:snapshot.layers){count+=layer.particles.size();if(!effectTexture(layer.texture).valid())ui_.effectStatus+="Не найдена текстура: "+layer.texture+"\n";}
-        if(count==0)ui_.effectStatus+="В этом кадре нет частиц. Измените время в «Эффектах».\n";
-        auto image=lab::ParticleThumbnail(snapshot,[&](const std::string& name){return effectTexture(name);});if(!texture(image,effectPreviewView_))ui_.effectStatus+="Ошибка создания предпросмотра на GPU.";
+        auto snapshot=effectSnapshot(ui_.effectCandidate);ui_.effectPreviewStatus="Статичный кадр; фон и масштаб предпросмотра условные.\n";
+        for(const auto& w:snapshot.warnings)ui_.effectPreviewStatus+=w+"\n";
+        size_t count=0;for(const auto& layer:snapshot.layers){if(!(layer.flags&1))continue;count+=layer.particles.size();if(!effectTexture(layer.texture).valid())ui_.effectPreviewStatus+="Не найдена текстура: "+layer.texture+"\n";}
+        if(count==0)ui_.effectPreviewStatus+="В этом кадре нет частиц. Измените время в «Эффектах».\n";
+        auto image=lab::ParticleThumbnail(snapshot,[&](const std::string& name){return effectTexture(name);});if(!texture(image,effectPreviewView_))ui_.effectPreviewStatus+="Ошибка создания предпросмотра на GPU.";
     }
     bool setEffect(int index,const std::string& name) {
         if(index<0||size_t(index)>=ui_.effects.size()||!current())return false;
@@ -363,7 +374,7 @@ class App {
         if(!std::isfinite(ui_.cameraFov))ui_.cameraFov=67.5f;if(!std::isfinite(ui_.hudFovFactor))ui_.hudFovFactor=.45f;
         ui_.cameraFov=std::clamp(ui_.cameraFov,5.f,179.f);ui_.hudFovFactor=std::clamp(ui_.hudFovFactor,.1f,1.f);
         std::string error;if(!lab::ReadWeaponHUD(data_,section_,hud_,error)){fail(error);return;}
-        renderer_.SetHudView(true,lab::HudModelTransform(hud_,ui_.hudAiming),ui_.cameraFov*ui_.hudFovFactor,ui_.cameraFov);
+        renderer_.SetHudView(true,lab::HudModelTransform(hud_,ui_.hudAiming),ui_.cameraFov*ui_.hudFovFactor);
         std::wstring renderError;
         if(ui_.hudMotionIndex>=0){if(!renderer_.SetAnimationPose(size_t(ui_.hudMotionIndex),ui_.hudMotionTime,true,renderError))fail(utf8(renderError));}
         else if(!renderer_.SetBindPose(&renderError))fail(utf8(renderError));
@@ -395,7 +406,7 @@ class App {
         const bool hudView=ui_.view==lab::WeaponView::Hud;
         std::string error,visual=record->visual;
         if(hudView){if(!lab::ReadWeaponHUD(data_,section_,hud_,error)){fail(error);return false;}visual=hud_.visual;}
-        renderer_.SetHudView(hudView,hudView?lab::HudModelTransform(hud_,ui_.hudAiming):lab::HudIdentity(),ui_.cameraFov*ui_.hudFovFactor,ui_.cameraFov);
+        renderer_.SetHudView(hudView,hudView?lab::HudModelTransform(hud_,ui_.hudAiming):lab::HudIdentity(),ui_.cameraFov*ui_.hudFovFactor);
         const auto model=assetPath(fs::u8path(loadedPaths_.values[4]),visual,L".ogf","meshes/");
         lab::Mesh mesh;
         if(model.empty()||!lab::LoadOGFMesh(readBytes(model),mesh,error)){fail("Модель "+visual+": "+(error.empty()?"файл не найден":error));return false;}
@@ -611,7 +622,12 @@ class App {
                 ui_.status="Изменён HUD ["+ui_.hudSection+"] "+key+"; требуется сохранение LTX.";
             }break;
         case A::HudPreviewSettings:stopInput();applyHudPreview();break;
-        case A::EffectVisibility:updateEffectsPreview();break;
+        case A::EffectVisibility:
+            updateEffectsPreview();
+            if(ui_.effectPickerOpen&&!ui_.effectCandidate.empty()){
+                auto i=std::find(ui_.effectNames.begin(),ui_.effectNames.end(),ui_.effectCandidate);
+                if(i!=ui_.effectNames.end())previewEffect(int(i-ui_.effectNames.begin()));
+            }break;
         case A::EffectEnabled:
             if(value>=0&&size_t(value)<ui_.effects.size()){
                 const auto row=ui_.effects[size_t(value)];
@@ -622,7 +638,7 @@ class App {
             if(value>=0&&size_t(value)<ui_.effects.size()){
                 ui_.effectSlot=value;ui_.effectPickerOpen=true;const auto& row=ui_.effects[size_t(value)];const auto name=row.enabled?row.name:row.remembered;
                 auto i=std::find(ui_.effectNames.begin(),ui_.effectNames.end(),name);if(i!=ui_.effectNames.end())previewEffect(int(i-ui_.effectNames.begin()));
-                else {ui_.effectCandidate.clear();effectPreviewView_.Reset();ui_.effectStatus="Выберите эффект в списке.";}
+                else {ui_.effectCandidate.clear();effectPreviewView_.Reset();ui_.effectPreviewStatus="Выберите эффект в списке.";}
             }break;
         case A::PreviewEffect:previewEffect(value);break;
         case A::ConnectEffect:
@@ -843,10 +859,24 @@ public:
         lab::Image hudFrame;check(renderer_.CaptureTransparent(hudFrame,512,error)&&std::any_of(hudFrame.pixels.begin(),hudFrame.pixels.end(),[](lab::Pixel p){return p.a>0;}),"HUD first person render");
         renderer_.SetHudView(false);renderer_.SetPartVisible(0,false);lab::Image withoutParticles,withParticles;
         check(renderer_.CaptureFrame(withoutParticles),"particle baseline capture");
-        lab::ParticleLayer particle;particle.texture="fixture";particle.shader="particles\\blend";lab::ParticleSample sample;sample.size={.6f,.6f,.6f};particle.particles.push_back(sample);
+        lab::ParticleLayer particle;particle.flags=1;particle.texture="fixture";particle.shader="particles\\blend";lab::ParticleSample sample;sample.size={.6f,.6f,.6f};particle.particles.push_back(sample);
         lab::Image sprite;sprite.w=sprite.h=2;sprite.pixels.assign(4,{255,20,10,255});
         check(renderer_.SetParticlePreview({{particle,lab::HudIdentity()}},{sprite},error),"particle shader and buffers");
         check(renderer_.CaptureFrame(withParticles)&&withParticles.pixels.size()==withoutParticles.pixels.size()&&std::memcmp(withParticles.pixels.data(),withoutParticles.pixels.data(),withParticles.pixels.size()*sizeof(lab::Pixel))!=0,"static game sprite pass is visible");
+        particle.particles[0].size={.04f,.04f,.04f};const lab::V3 attachment={.15f,.1f,.2f};
+        for(const auto rotation:std::array<lab::V3,4>{{{0,0,0},{30,0,0},{0,-30,0},{0,0,90}}}){
+            const auto pose=lab::HudOffset({0,0,2},rotation);renderer_.SetHudView(true,pose,30);
+            bool visible=renderer_.SetParticlePreview({{particle,lab::HudEmitterTransform(pose,attachment)}},{sprite},error);
+            lab::Image frame;visible=visible&&renderer_.ProjectPoint(attachment,px,py)&&renderer_.CaptureFrame(frame)&&frame.valid();
+            if(visible){const auto x=std::min(frame.w-1,uint32_t(px*frame.w)),y=std::min(frame.h-1,uint32_t(py*frame.h));const auto pixel=frame.pixels[size_t(y)*frame.w+x];visible=pixel.r>200&&pixel.g<60&&pixel.b<60;}
+            check(visible,"HUD rotated emitter sprite and marker share model projection");
+        }
+        particle.shader="particles\\add";for(auto& pixel:sprite.pixels)pixel.a=0;
+        check(renderer_.SetParticlePreview({{particle,lab::HudEmitterTransform(lab::HudOffset({0,0,2},{0,0,90}),attachment)}},{sprite},error),"ADD shader ignores texture alpha");
+        lab::Image addFrame;bool addVisible=renderer_.CaptureFrame(addFrame)&&addFrame.valid();
+        if(addVisible){const auto x=std::min(addFrame.w-1,uint32_t(px*addFrame.w)),y=std::min(addFrame.h-1,uint32_t(py*addFrame.h));addVisible=addFrame.pixels[size_t(y)*addFrame.w+x].r>200;}
+        check(addVisible,"zero-alpha additive particle is visible");
+        renderer_.SetHudView(false);
         renderer_.ClearParticlePreview();renderer_.SetPartVisible(0,true);
         std::string e;auto icon=lab::FitIconSnapshot(shot,250,100,2,e);check(icon.valid(),"snapshot fit");
         const auto temporary=fs::temp_directory_path()/(L"WeaponLab-smoke-"+std::to_wstring(GetCurrentProcessId())+L".png");

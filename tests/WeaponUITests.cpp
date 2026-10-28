@@ -221,6 +221,10 @@ void hudAndGroups(){
     s.effectNames={"weapons\\test","weapons\\second"};s.effectSlot=0;s.effectPickerOpen=true;step();step();step();auto* list=findWindow("EffectList");actions.clear();click(hover(list,list->GetID(s.effectNames[1].c_str())));
     require(std::find(actions.begin(),actions.end(),std::make_pair(lab::WeaponAction::PreviewEffect,1))!=actions.end(),"picker requests candidate preview only");
     require(s.effects[0].name=="weapons\\test","browsing candidates leaves configured effect unchanged");
+    auto* picker=findWindow("Выбор эффекта");actions.clear();click(hover(picker,picker->GetID("Автокадр для коротких эффектов")));
+    require(!s.effectAutoFrame,"picker can select exact-time preview");
+    require(std::find(actions.begin(),actions.end(),std::make_pair(lab::WeaponAction::EffectVisibility,-1))!=actions.end(),"frame settings refresh preview without connecting effect");
+    require(s.effects[0].name=="weapons\\test"&&s.effects[0].enabled,"frame settings preserve configured effect");
 }
 void snapshot(const std::string& path,int width,int height) {
     unsigned char* atlas=nullptr;int aw=0,ah=0;ImGui::GetIO().Fonts->GetTexDataAsRGBA32(&atlas,&aw,&ah);

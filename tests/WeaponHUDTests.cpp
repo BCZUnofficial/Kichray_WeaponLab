@@ -16,17 +16,19 @@ void vec(Bytes& b,float x,float y,float z){f(b,x);f(b,y);f(b,z);}
 void z(Bytes& b,const char* s){b.insert(b.end(),s,s+std::strlen(s)+1);}
 void chunk(Bytes& b,uint32_t id,const Bytes& payload){u(b,id);u(b,uint32_t(payload.size()));b.insert(b.end(),payload.begin(),payload.end());}
 Bytes word(uint32_t v){Bytes b;u(b,v);return b;}
-void pointDomain(Bytes& b,float x,float y,float z0){u(b,0);vec(b,x,y,z0);for(int i=0;i<13;++i)f(b,0);}
-Bytes fixture(bool group=false){
-    Bytes root;chunk(root,1,{1,0});Bytes effect;chunk(effect,1,{1,0});Bytes name;z(name,"weapons\\fixture");chunk(effect,2,name);chunk(effect,3,word(30));chunk(effect,5,word(1));
+void pointDomain(Bytes& b,float x,float y,float z0,bool unusedNaN=false){u(b,0);vec(b,x,y,z0);for(int i=0;i<13;++i)u(b,unusedNaN?0x7fc00000u:0);}
+Bytes fixture(bool group=false,bool unusedNaN=false,bool silent=false,bool flash=false,bool framed=true){
+    Bytes root;chunk(root,1,{1,0});Bytes effect;chunk(effect,1,{1,0});Bytes name;z(name,"weapons\\fixture");chunk(effect,2,name);chunk(effect,3,word(30));chunk(effect,5,word(1|(unusedNaN&&framed?1<<10:0)|(flash?1<<14:0)));
+    if(unusedNaN&&framed){Bytes frame;f(frame,1);f(frame,1);u(frame,0x7fc00000u);u(frame,0x7fc00000u);u(frame,1);u(frame,1);f(frame,0);chunk(effect,6,frame);}
+    if(flash){Bytes limit;f(limit,.034f);chunk(effect,8,limit);}
     Bytes sprite;z(sprite,"particles\\blend");z(sprite,"fx\\fixture");chunk(effect,7,sprite);
     Bytes actions;u(actions,4);
-    u(actions,21);u(actions,0);u(actions,21); // type, flags, serialized type
-    pointDomain(actions,0,0,1);pointDomain(actions,1,0,0);pointDomain(actions,0,0,0);pointDomain(actions,.1f,.2f,.1f);pointDomain(actions,1,.5f,.2f);
+    u(actions,21);u(actions,silent?1u<<30:0);u(actions,21); // type, flags, serialized type
+    pointDomain(actions,0,0,1,unusedNaN);pointDomain(actions,1,0,0,unusedNaN);pointDomain(actions,0,0,0,unusedNaN);pointDomain(actions,.1f,.2f,.1f,unusedNaN);pointDomain(actions,1,.5f,.2f,unusedNaN);
     f(actions,1);f(actions,30.303031f);f(actions,0);f(actions,0);vec(actions,0,0,0);f(actions,0);
     u(actions,8);u(actions,0);u(actions,8);vec(actions,0,-9,0);
     u(actions,12);u(actions,0);u(actions,12);
-    u(actions,10);u(actions,0);u(actions,10);f(actions,2);u(actions,0);
+    u(actions,10);u(actions,0);u(actions,10);f(actions,flash?.05f:2.f);u(actions,0);
     chunk(effect,4,actions);Bytes effects;chunk(effects,0,effect);chunk(root,3,effects);
     if(group){Bytes g;chunk(g,1,{3,0});name.clear();z(name,"weapons\\group");chunk(g,2,name);chunk(g,3,word(0));Bytes members;u(members,1);z(members,"weapons\\fixture");z(members,"");z(members,"");z(members,"");f(members,.5f);f(members,1);u(members,4);chunk(g,4,members);Bytes groups;chunk(groups,0,g);chunk(root,4,groups);}
     return root;
@@ -43,6 +45,17 @@ int main(){
     auto chained=HudMultiply(HudOffset({1,0,0},{}),HudOffset({0,2,0},{90,0,0}));p=HudPoint(chained,{});assert(near(p.x,0)&&near(p.y,2)&&near(p.z,1));
     HudConfiguration h;h.position={1,2,3};h.zoomX=1.57079632679f;h.zoomOffset={0,0,1};p=HudPoint(HudModelTransform(h,true),{});assert(near(p.x,1)&&near(p.y,-3)&&near(p.z,3));
     auto basis=HudParticleBasis(HudOffset({},{30,20,45}),{4,5,6});auto forward=HudDirection(basis,{0,0,1}),reference=HudDirection(HudOffset({},{30,20,45}),{0,0,1});assert(near(forward.x,reference.x)&&near(forward.y,reference.y));p=HudPoint(basis,{});assert(p.x==4&&p.y==5&&p.z==6);
+    // All three emitters use the bone's local point, then the same full HUD
+    // transform as the mesh. Bank must not be lost by rebuilding a world-up basis.
+    for(auto rotation:std::vector<V3>{{90,0,0},{0,-90,0},{0,0,90},{25,-30,75}}){
+        HudConfiguration pose;pose.position={.1f,-.2f,2};pose.orientation=rotation;pose.zoomOffset={-.1f,.05f,.2f};pose.zoomX=.2f;pose.zoomY=-.1f;
+        for(bool aim:{false,true})for(auto local:std::vector<V3>{{.1f,0,.6f},{-.1f,.1f,.5f},{.2f,.2f,.3f}}){
+            auto bone=HudOffset({.02f,.03f,.1f},{10,20,30});auto model=HudModelTransform(pose,aim);
+            auto emitter=HudEmitterTransform(model,HudPoint(bone,local));auto expected=HudPoint(HudMultiply(bone,model),local);auto actual=HudPoint(emitter,{});
+            assert(near(actual.x,expected.x)&&near(actual.y,expected.y)&&near(actual.z,expected.z));
+            for(auto axis:std::vector<V3>{{1,0,0},{0,1,0},{0,0,1}}){auto a=HudDirection(emitter,axis),b=HudDirection(model,axis);assert(near(a.x,b.x)&&near(a.y,b.y)&&near(a.z,b.z));}
+        }
+    }
     std::string error;assert(!ValidateHudParameter("position","1,2",error));assert(!ValidateHudParameter("orientation","nan,0,0",error));assert(ValidateHudParameter("position","-1, -.25, 0.001",error));
     assert(ClassifyWeaponParameter("fire_dispersion_base")==ParameterGroup::Accuracy);assert(ClassifyWeaponParameter("k_disp")==ParameterGroup::Accuracy);assert(ClassifyWeaponParameter("condition_shot_dec")==ParameterGroup::Durability);assert(ClassifyWeaponParameter("bullet_speed")==ParameterGroup::Ballistics);assert(ClassifyWeaponParameter("fire_point",true)==ParameterGroup::Emitters);assert(ClassifyWeaponParameter("orientation",true)==ParameterGroup::HudPose);assert(ClassifyWeaponParameter("unrecognized")==ParameterGroup::Other);
     const auto dir=std::filesystem::temp_directory_path()/("weaponlab-hud-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));std::filesystem::create_directories(dir/"weapons");
@@ -56,6 +69,20 @@ int main(){
     auto repeated=library.snapshot("weapons\\fixture",.1f);assert(repeated.layers[0].particles.size()==snap.layers[0].particles.size());assert(repeated.layers[0].particles.front().position.x==sample.position.x);
     assert(library.snapshot("weapons\\group",.4f).layers.empty());assert(!library.snapshot("weapons\\group",.6f).layers[0].particles.empty());assert(library.snapshot("weapons\\fixture",5).layers.empty());
     Image sprite;sprite.w=sprite.h=2;sprite.pixels.assign(4,{255,255,255,255});auto thumb=ParticleThumbnail(snap,[&](const std::string&){return sprite;},128);assert(thumb.valid());bool painted=false;for(const auto& v:thumb.pixels)painted|=v.r!=24;assert(painted);
+    ParticleLibrary gameLayout;assert(gameLayout.load(fixture(false,true),error));auto gameSnap=gameLayout.snapshot("weapons\\fixture",.1f);assert(gameSnap.warnings.empty()&&ParticleSnapshotVisible(gameSnap));
+    assert(gameLayout.load(fixture(false,true,false,false,false),error));assert(ParticleSnapshotVisible(gameLayout.snapshot("weapons\\fixture",.1f)));
+    auto badPosition=fixture();Bytes sourceHeader;u(sourceHeader,21);u(sourceHeader,0);u(sourceHeader,21);u(sourceHeader,0);
+    auto sourceAt=std::search(badPosition.begin(),badPosition.end(),sourceHeader.begin(),sourceHeader.end());assert(sourceAt!=badPosition.end());
+    const auto posOffset=size_t(sourceAt-badPosition.begin())+16;auto nan=word(0x7fc00000u);std::copy(nan.begin(),nan.end(),badPosition.begin()+posOffset);
+    ParticleLibrary invalidValue;assert(invalidValue.load(badPosition,error));auto rejected=invalidValue.snapshot("weapons\\fixture",.1f);assert(!ParticleSnapshotVisible(rejected)&&!rejected.warnings.empty());
+    ParticleLibrary stopped;assert(stopped.load(fixture(false,false,true),error));assert(ParticleSnapshotVisible(stopped.snapshot("weapons\\fixture",.1f)));
+    ParticleLibrary flash;assert(flash.load(fixture(false,false,false,true),error));assert(!ParticleSnapshotVisible(flash.snapshot("weapons\\fixture",.165f)));
+    auto automatic=flash.preview("weapons\\fixture",.165f,true);assert(ParticleSnapshotVisible(automatic)&&near(automatic.sampledTime,.033f));assert(!ParticleSnapshotVisible(flash.preview("weapons\\fixture",.165f,false)));
+    assert(!ParticleSnapshotVisible(library.snapshot("weapons\\group",.4f)));assert(ParticleSnapshotVisible(library.preview("weapons\\group",.4f,true)));
+    assert(ParticleShaderBlend("particles\\add")==ParticleBlend::Add&&ParticleShaderBlend("particles\\aadd")==ParticleBlend::AlphaAdd);
+    auto additive=snap;additive.layers[0].shader="particles\\add";for(auto& v:additive.layers[0].particles)v.a=0;for(auto& v:sprite.pixels)v.a=0;
+    auto addThumb=ParticleThumbnail(additive,[&](const std::string&){return sprite;},128);assert(std::any_of(addThumb.pixels.begin(),addThumb.pixels.end(),[](auto v){return v.r!=24;}));
+    additive.layers[0].shader="particles\\aadd";auto alphaThumb=ParticleThumbnail(additive,[&](const std::string&){return sprite;},128);assert(std::all_of(alphaThumb.pixels.begin(),alphaThumb.pixels.end(),[](auto v){return v.r==24;}));
     for(size_t cut=0;cut<bytes.size();++cut){auto truncated=Bytes(bytes.begin(),bytes.begin()+cut);ParticleLibrary bad;std::string diagnostic;if(bad.load(truncated,diagnostic)){for(const auto& e:bad.entries())bad.snapshot(e.name,.1f);}else assert(!diagnostic.empty());}
     Bytes compressed;chunk(compressed,0x80000001u,{1,0});assert(!library.load(compressed,error));assert(library.entries().size()==2); // transactional failure
     std::cout<<"PASS: HUD transforms, inheritance/save, disjoint groups, empty effect override, particles.xr/PED/PGD, frozen source/gravity/move, malformed chunks\n";

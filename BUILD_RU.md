@@ -1,4 +1,4 @@
-# Сборка Kichray WeaponLab 0.4.0
+# Сборка Kichray WeaponLab 0.4.1
 
 ## Windows / Visual Studio 2022
 
@@ -116,4 +116,4 @@ Workflow запускается при push в master, pull request или вр�
 База 0.2.0 (коммит `19f07ccb6bdfaa8eebb92ff9813dae5094076bd5`) прошла
 [GitHub Actions №40493611408](https://github.com/BCZUnofficial/Kichray_WeaponLab/actions/runs/40493611408):
 MSVC x64, нативный D3D11/WARP/PNG и Linux ASan/UBSan. Это результат предыдущей
-версии; он не заменяет отдельную Windows-проверку изменений 0.4.0.
+версии; он не заменяет отдельную Windows-проверку изменений 0.4.1.

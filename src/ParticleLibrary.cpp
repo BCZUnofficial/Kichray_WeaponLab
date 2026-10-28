@@ -5,6 +5,7 @@
 #include <random>
 #include <set>
 #include <stdexcept>
+#include <cctype>
 
 namespace lab { namespace {
 struct Reader {
@@ -25,7 +26,20 @@ void warning(std::vector<std::string>& w,const std::string& s){if(std::find(w.be
 float random(std::mt19937& r){return float(r()>>8)*(1.f/16777216.f);}
 float gaussian(std::mt19937& r,float sigma){if(sigma==0)return 0;float y;do{y=-std::log(std::max(1e-7f,random(r)));}while(random(r)>std::exp(-(y-1)*(y-1)/2));return y*sigma*(random(r)>.5f?1.f:-1.f)/.7975f;}
 struct Domain {uint32_t type;V3 p1,p2,u,v;float r1,r2,r1sq,r2sq;};
-Domain domain(Reader& r){Domain d{r.u(),r.v(),r.v(),r.v(),r.v(),r.f(),r.f(),r.f(),r.f()};if(d.type>10)throw std::runtime_error("Неизвестный pDomain.");return d;}
+Domain domain(Reader& r){
+    // pDomain::Save writes sizeof(pDomain), but its constructor only initializes
+    // fields used by the selected domain. Ignore padding/unused float slots.
+    auto raw=r.take(68);Domain d{};d.type=raw.u();
+    if(d.type>10)throw std::runtime_error("Неизвестный pDomain.");
+    auto v=[&](size_t offset){auto q=raw;q.at=offset;return q.v();};
+    auto f=[&](size_t offset){auto q=raw;q.at=offset;return q.f();};
+    d.p1=v(4);
+    if(d.type==1||d.type==3||d.type==4||d.type==6||d.type==7)d.p2=v(16);
+    if(d.type==2||d.type==6||d.type==7||d.type==9||d.type==10){d.u=v(28);d.v=v(40);}
+    if(d.type==5||d.type==6||d.type==7||d.type==8||d.type==9)d.r1=f(52);
+    if(d.type==5||d.type==6||d.type==7||d.type==9)d.r2=f(56);
+    return d;
+}
 V3 generate(const Domain& d,std::mt19937& rng){auto R=[&](){return random(rng);};float a,b;
     switch(d.type){case 0:case 3:return d.p1;case 1:return add(d.p1,scale(d.p2,R()));
     case 4:return {d.p1.x+(d.p2.x-d.p1.x)*R(),d.p1.y+(d.p2.y-d.p1.y)*R(),d.p1.z+(d.p2.z-d.p1.z)*R()};
@@ -46,7 +60,7 @@ bool ParticleLibrary::load(const std::vector<uint8_t>& bytes,std::string& error)
         if(root.count(3))for(const auto& item:chunks(root.at(3))){auto c=chunks(item.second);if(required(c,1).u16()!=1)throw std::runtime_error("Неподдерживаемая версия PED.");
             Effect e;e.layer.name=required(c,2).s();e.maximum=required(c,3).u();e.layer.flags=required(c,5).u();if(e.layer.name.empty()||e.maximum>1000000)throw std::runtime_error("Неверное имя/лимит PED.");
             if(e.layer.flags&1){auto r=required(c,7);e.layer.shader=r.s();e.layer.texture=r.s();}
-            if(e.layer.flags&(1<<10)){auto r=required(c,6);e.layer.frameU=r.f();e.layer.frameV=r.f();r.f();r.f();e.layer.frameColumns=r.u();e.layer.frameCount=r.u();e.layer.frameSpeed=r.f();
+            if(e.layer.flags&(1<<10)){auto r=required(c,6);e.layer.frameU=r.f();e.layer.frameV=r.f();r.take(8);e.layer.frameColumns=r.u();e.layer.frameCount=r.u();e.layer.frameSpeed=r.f();
                 if(e.layer.frameU<=0||e.layer.frameU>1||e.layer.frameV<=0||e.layer.frameV>1||!e.layer.frameColumns||e.layer.frameColumns>65536||!e.layer.frameCount||e.layer.frameCount>65536)throw std::runtime_error("Неверная сетка кадров PED.");}
             if(e.layer.flags&(1<<14))e.limit=required(c,8).f();if(c.count(0x22))e.layer.velocityScale=c.at(0x22).v();if(c.count(0x25))e.layer.defaultRotation=c.at(0x25).v();else e.layer.defaultRotation={-1.5707963f,0,0};
             auto actions=required(c,4);auto count=actions.u();if(count>4096)throw std::runtime_error("Слишком много действий PED.");
@@ -69,7 +83,9 @@ ParticleLayer ParticleLibrary::sampleEffect(const Effect& e,float time,uint32_t 
     for(int step=0;step<int(std::clamp(time,0.f,4.f)/dt);++step){
         for(const auto& action:e.actions){Reader r{action.data.data(),action.data.size()};const auto type=action.type;
             if(type==21){Domain pos=domain(r),vel=domain(r),rot=domain(r),size=domain(r),color=domain(r);float alpha=r.f(),rate=r.f(),age=r.f(),sigma=r.f();r.v();r.f();
-                if((action.flags&(1u<<30))||((layer.flags&(1<<14))&&(step+1)*dt>e.limit)||(stop>=0&&(step+1)*dt>stop))continue;
+                // CParticleManager::PlayEffect clears PASource::flSilent. It is
+                // runtime state, not a permanent disable flag in particles.xr.
+                if(((layer.flags&(1<<14))&&(step+1)*dt>e.limit)||(stop>=0&&(step+1)*dt>stop))continue;
                 double expected=std::clamp(double(rate)*dt,0.0,1000000.0);size_t count=size_t(expected)+(random(rng)<expected-std::floor(expected));count=std::min(count,cap-p.size());
                 for(size_t j=0;j<count;++j){ParticleSample s;s.position=generate(pos,rng);s.size=generate(size,rng);if(action.flags&(1u<<29))s.size={s.size.x,s.size.x,s.size.x};s.rotation=generate(rot,rng);s.velocity=generate(vel,rng);auto c=generate(color,rng);s.r=c.x;s.g=c.y;s.b=c.z;s.a=alpha;s.age=age+gaussian(rng,sigma);if(layer.flags&(1<<12))s.frame=float(rng()%layer.frameCount);p.push_back(s);}continue;
             }
@@ -92,7 +108,7 @@ ParticleLayer ParticleLibrary::sampleEffect(const Effect& e,float time,uint32_t 
     return layer;
 }
 ParticleSnapshot ParticleLibrary::snapshot(const std::string& name,float time,uint32_t seed)const{
-    ParticleSnapshot out;if(!std::isfinite(time)||time<0||time>4){out.warnings.push_back("Время кадра должно быть от 0 до 4 секунд.");return out;}
+    ParticleSnapshot out;out.sampledTime=time;if(!std::isfinite(time)||time<0||time>4){out.warnings.push_back("Время кадра должно быть от 0 до 4 секунд.");return out;}
     try{auto addEffect=[&](const std::string& n,float t,float stop){auto e=effects_.find(n);if(e==effects_.end()){warning(out.warnings,"Не найден PED: "+n);return;}if(out.layers.size()>=64){warning(out.warnings,"Предпросмотр ограничен 64 слоями.");return;}out.layers.push_back(sampleEffect(e->second,t,seed++,out.warnings,stop));};
         auto e=effects_.find(name);if(e!=effects_.end()){addEffect(name,time,-1);return out;}auto g=groups_.find(name);if(g==groups_.end()){out.warnings.push_back("Эффект не найден: "+name);return out;}
         for(const auto& m:g->second.members){if(!(m.flags&4)||time<m.start)continue;if(time>=m.end&&!(m.flags&1))continue;float stop=std::max(0.f,m.end-m.start);if(g->second.limit>0)stop=std::min(stop,std::max(0.f,g->second.limit-m.start));addEffect(m.effect,time-m.start,stop);
@@ -100,14 +116,33 @@ ParticleSnapshot ParticleLibrary::snapshot(const std::string& name,float time,ui
             if(m.flags&((1<<5)|(1<<6)))warning(out.warnings,"Дочерние эффекты OnBirth/OnDeath не воспроизводятся в статичном предпросмотре.");}
     }catch(const std::exception& e){out.layers.clear();out.warnings.push_back(e.what());}return out;
 }
-bool ParticleShaderAdditive(const std::string& shader){return shader.find("add")!=std::string::npos;}
+ParticleBlend ParticleShaderBlend(const std::string& shader){
+    std::string name=shader;for(auto& c:name)c=char(std::tolower(static_cast<unsigned char>(c)));
+    // Conventional shader names; custom shaders.xr definitions remain approximate.
+    if(name.find("aadd")!=std::string::npos||name.find("alpha_add")!=std::string::npos||name.find("alpha-add")!=std::string::npos||name.find("alphaadd")!=std::string::npos)return ParticleBlend::AlphaAdd;
+    return name.find("add")!=std::string::npos?ParticleBlend::Add:ParticleBlend::Alpha;
+}
+bool ParticleSnapshotVisible(const ParticleSnapshot& snapshot){
+    for(const auto& layer:snapshot.layers)if((layer.flags&1)&&!layer.texture.empty())for(const auto& p:layer.particles)
+        if(std::abs(p.size.x)>1e-7f&&std::abs(p.size.y)>1e-7f&&(p.r>0||p.g>0||p.b>0)&&(p.a>1e-5f||ParticleShaderBlend(layer.shader)==ParticleBlend::Add))return true;
+    return false;
+}
+ParticleSnapshot ParticleLibrary::preview(const std::string& name,float time,bool automatic,uint32_t seed)const{
+    auto out=snapshot(name,time,seed);
+    if(!automatic||!std::isfinite(time)||time<0||time>4||!contains(name)||ParticleSnapshotVisible(out))return out;
+    // Muzzle flashes can have finished at the default 165ms. Freeze the first
+    // visible engine timestep rather than silently showing an empty scene.
+    for(int step=1;step<=121;++step){auto candidate=snapshot(name,step*.033f,seed);if(ParticleSnapshotVisible(candidate)){
+        warning(candidate.warnings,"Автокадр: "+std::to_string(step*33)+" мс (в выбранный момент эффект не виден).");return candidate;}}
+    warning(out.warnings,"Нет видимых sprite-частиц в интервале 0–4 с; проверьте диагностику эффекта.");return out;
+}
 Image ParticleThumbnail(const ParticleSnapshot& snapshot,const std::function<Image(const std::string&)>& load,uint32_t size){
     size=std::clamp(size,64u,512u);Image out;out.w=out.h=size;out.pixels.assign(size_t(size)*size,{24,27,32,255});float extent=.02f;
     for(const auto& l:snapshot.layers)for(const auto& p:l.particles)extent=std::max(extent,std::max(std::abs(p.position.x),std::abs(p.position.y))+std::max(std::abs(p.size.x),std::abs(p.size.y)));
     float scalePx=size*.45f/extent;
-    for(const auto& l:snapshot.layers){auto tex=load(l.texture);if(!tex.valid())continue;bool addBlend=ParticleShaderAdditive(l.shader);
+    for(const auto& l:snapshot.layers){if(!(l.flags&1))continue;auto tex=load(l.texture);if(!tex.valid())continue;const auto blendMode=ParticleShaderBlend(l.shader);bool addBlend=blendMode!=ParticleBlend::Alpha;
         for(const auto& p:l.particles){float cx=size*.5f+p.position.x*scalePx,cy=size*.5f-p.position.y*scalePx,rx=std::max(.5f,std::abs(p.size.x)*scalePx*.5f),ry=std::max(.5f,std::abs(p.size.y)*scalePx*.5f);float angle=p.rotation.x,co=std::cos(angle),si=std::sin(angle),radius=std::hypot(rx,ry);uint32_t frame=uint32_t(std::max(0.f,p.frame))%l.frameCount;
-            for(int y=std::max(0,int(cy-radius));y<std::min(int(size),int(cy+radius+1));++y)for(int x=std::max(0,int(cx-radius));x<std::min(int(size),int(cx+radius+1));++x){float dx=x+.5f-cx,dy=y+.5f-cy,u=(dx*co+dy*si)/rx*.5f+.5f,v=(-dx*si+dy*co)/ry*.5f+.5f;if(u<0||u>=1||v<0||v>=1)continue;u=(frame%l.frameColumns+u)*l.frameU;v=(frame/l.frameColumns+v)*l.frameV;const auto& t=tex.pixels[size_t(std::min(tex.h-1,uint32_t(std::max(0.f,v)*tex.h)))*tex.w+std::min(tex.w-1,uint32_t(std::max(0.f,u)*tex.w))];float a=std::clamp(t.a/255.f*p.a,0.f,1.f);auto& dst=out.pixels[size_t(y)*size+x];auto blend=[&](uint8_t old,uint8_t val,float color){return uint8_t(std::clamp(old*(addBlend?1.f:1-a)+val*std::clamp(color,0.f,1.f)*a,0.f,255.f));};dst.r=blend(dst.r,t.r,p.r);dst.g=blend(dst.g,t.g,p.g);dst.b=blend(dst.b,t.b,p.b);}
+            for(int y=std::max(0,int(cy-radius));y<std::min(int(size),int(cy+radius+1));++y)for(int x=std::max(0,int(cx-radius));x<std::min(int(size),int(cx+radius+1));++x){float dx=x+.5f-cx,dy=y+.5f-cy,u=(dx*co+dy*si)/rx*.5f+.5f,v=(-dx*si+dy*co)/ry*.5f+.5f;if(u<0||u>=1||v<0||v>=1)continue;u=(frame%l.frameColumns+u)*l.frameU;v=(frame/l.frameColumns+v)*l.frameV;const auto& t=tex.pixels[size_t(std::min(tex.h-1,uint32_t(std::max(0.f,v)*tex.h)))*tex.w+std::min(tex.w-1,uint32_t(std::max(0.f,u)*tex.w))];float a=blendMode==ParticleBlend::Add?1.f:std::clamp(t.a/255.f*p.a,0.f,1.f);auto& dst=out.pixels[size_t(y)*size+x];auto blend=[&](uint8_t old,uint8_t val,float color){return uint8_t(std::clamp(old*(addBlend?1.f:1-a)+val*std::clamp(color,0.f,1.f)*a,0.f,255.f));};dst.r=blend(dst.r,t.r,p.r);dst.g=blend(dst.g,t.g,p.g);dst.b=blend(dst.b,t.b,p.b);}
         }
     }return out;
 }

@@ -1,5 +1,5 @@
 {
-  "new_app": "Kichray WeaponLab 0.4.0",
+  "new_app": "Kichray WeaponLab 0.4.1",
   "source_base": "restored MaterialLab 0.13.0; original base 9d0be1aa320651207d7922d712e0741922ea6aa1 + user patch",
   "unchanged_renderer_assets": [
     "src/FlightInput.h",
@@ -32,25 +32,27 @@
     "All 38 UI actions handled; all 13 production cpp files in VS project",
     "HUD draft switches reject invalid vectors; HUD and weapon writes use different section IDs",
     "Whole-model HUD transform reverses viewer normalization; bone emitter offsets use animated bone matrix",
-    "HUD 0.2m near/0..0.02 depth and distinct world-FOV particle projection match reference R1/R2 sources",
     "Effect visibility separate from config enable; empty overrides preserve disabled inheritance",
     "World/HUD part visibility remembered by model path; OMF refs imported",
     "Legacy 0.3 settings derive missing particles.xr path from remembered gamedata",
-    "No native Windows execution performed for this revision"
+    "No native Windows execution performed for this revision",
+    "HUD model, markers and static sprites share FOV/depth for attached placement",
+    "All emitter transforms preserve whole-model bank as well as heading/pitch",
+    "Particle cache cleared on library/path reload; 16 frames / 64 MiB sample budget",
+    "Picker auto/exact time changes only preview, never LTX"
   ],
   "ui_visual_review": {
     "method": "CPU rasterization of actual ImGui draw lists with synthetic fixtures; not native D3D11 rendering",
     "reviewed": [
-      "HUD groups and camera settings at 960x600",
-      "Effects panel at 1490x900",
-      "Centered effect picker fits 960x600"
+      "0.4.1 effect picker at 960x600: auto/exact time controls and connect/close buttons visible; synthetic CPU layout only"
     ],
     "interaction_tests": [
       "collapse/expand group",
       "HUD switch acceptance boundary",
       "HUD millimetre wheel stepping without editing World",
       "effect preview visibility does not disable config",
-      "browsing candidate leaves connected effect unchanged"
+      "browsing candidate leaves connected effect unchanged",
+      "picker automatic-frame checkbox triggers refresh without connecting"
     ]
   },
   "renderer_extension": "World shading/navigation path retained. Separate HUD matrices/projection and optional static particle pass added."

@@ -24,6 +24,10 @@ HudMatrix HudParticleBasis(const HudMatrix& hud,V3 origin){
     return {right.x,right.y,right.z,0,up.x,up.y,up.z,0,d.x,d.y,d.z,0,origin.x,origin.y,origin.z,1};
 }
 std::string ConfigString(const WeaponConfigValues& v,const std::string& k){auto i=v.find(k);if(i==v.end())return {};auto s=i->second;auto a=s.find_first_not_of(" \t");if(a==std::string::npos)return {};s=s.substr(a,s.find_last_not_of(" \t")-a+1);if(s.size()>=2&&s.front()=='"'&&s.back()=='"')s=s.substr(1,s.size()-2);return s;}
+HudMatrix HudEmitterTransform(const HudMatrix& hud,V3 modelPoint){
+    auto result=hud;const auto origin=HudPoint(hud,modelPoint);
+    result[12]=origin.x;result[13]=origin.y;result[14]=origin.z;return result;
+}
 bool ValidateHudParameter(const std::string& key,const std::string& value,std::string& error){
     const bool vector=key=="position"||key=="orientation"||key=="fire_point"||key=="fire_point2"||key=="shell_point"||key=="zoom_offset"||key=="grenade_zoom_offset";
     const bool scalar=key=="zoom_rotate_x"||key=="zoom_rotate_y"||key=="grenade_zoom_rotate_x"||key=="grenade_zoom_rotate_y";

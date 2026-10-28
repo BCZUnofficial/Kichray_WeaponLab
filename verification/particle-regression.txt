@@ -1,0 +1,13 @@
+Same synthetic engine-layout fixtures, compiled against 0.4.0 and 0.4.1.
+BEFORE (6428e27):
+SFrame reserved NaN: load=0, particles=0, error=NaN/Inf в particles.xr.
+pDomain unused NaN: load=1, particles=0, error= NaN/Inf в particles.xr.
+Source runtime Silent: load=1, particles=0, error=
+
+AFTER:
+SFrame reserved NaN: load=1, particles=3, error=
+pDomain unused NaN: load=1, particles=3, error=
+Source runtime Silent: load=1, particles=3, error=
+
+Additional automated assertions: short-flash auto/exact time; ADD vs ALPHA-ADD with zero alpha; used-domain NaN still rejected; all three bone-local emitters follow full HUD rotation and aiming.
+No real user particles.xr or native Windows runtime was used.

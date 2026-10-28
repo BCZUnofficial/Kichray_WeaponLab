@@ -16,7 +16,7 @@ struct ParticleLayer {
     V3 velocityScale{},defaultRotation{};
     std::vector<ParticleSample> particles;
 };
-struct ParticleSnapshot { std::vector<ParticleLayer> layers;std::vector<std::string> warnings; };
+struct ParticleSnapshot { std::vector<ParticleLayer> layers;std::vector<std::string> warnings;float sampledTime=0; };
 struct ParticleEntry {std::string name;bool group=false;};
 // Read-only particles.xr v1, PED v1 and PGD v3, as in the pinned engine master.
 // The game library and its textures are never rewritten by the editor.
@@ -34,7 +34,11 @@ public:
     const std::vector<ParticleEntry>& entries()const{return entries_;}
     bool contains(const std::string& name)const;
     ParticleSnapshot snapshot(const std::string& name,float time,uint32_t seed=1701)const;
+    // Keep exact-time sampling above; editor may explicitly choose a visible frame.
+    ParticleSnapshot preview(const std::string& name,float time,bool automatic,uint32_t seed=1701)const;
 };
-bool ParticleShaderAdditive(const std::string& shader);
+enum class ParticleBlend { Alpha, Add, AlphaAdd };
+ParticleBlend ParticleShaderBlend(const std::string& shader);
+bool ParticleSnapshotVisible(const ParticleSnapshot& snapshot);
 Image ParticleThumbnail(const ParticleSnapshot& snapshot,const std::function<Image(const std::string&)>& texture,uint32_t size=384);
 }

@@ -71,8 +71,8 @@ struct WeaponUIState {
     std::vector<WeaponMarker> markers;
     std::vector<WeaponEffectRow> effects;
     std::vector<std::string> effectNames;
-    std::string effectSearch,effectCandidate,effectStatus,particleLibraryStatus;
-    bool effectPickerOpen=false;
+    std::string effectSearch,effectCandidate,effectStatus,effectPreviewStatus,particleLibraryStatus;
+    bool effectPickerOpen=false,effectAutoFrame=true;
     int effectSlot=-1;
     float effectTime=.165f;
     ImTextureID effectPreviewTexture=0;
